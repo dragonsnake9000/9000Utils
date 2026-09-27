@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "utils9000",
+  "version": "2.2.0",
+  "name": "9000Utils",
+  "description": "Lavacast pathfinding with block selection, region limits, moss scaffolding, activity pauses and shulker refilling.",
+  "authors": ["dragonsnake9000"],
+  "license": "GPL-3.0-or-later",
+  "environment": "client",
+  "mixins": ["9000utils.mixins.json"],
+  "entrypoints": {
+    "meteor": ["dev.dragonsnake9000.utils.Utils9000Addon"]
+  },
+  "custom": { "meteor-client:color": "255,170,0" },
+  "depends": {
+    "java": ">=21",
+    "minecraft": "1.21.4",
+    "fabricloader": ">=0.16.9",
+    "meteor-client": "1.21.4-42",
+    "baritone-meteor": "*"
+  }
+}
