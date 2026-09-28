@@ -1,6 +1,7 @@
 package dev.dragonsnake9000.utils;
 
 import baritone.api.BaritoneAPI;
+import baritone.pathing.movement.MovementHelper;
 import baritone.api.utils.input.Input;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -12,6 +13,29 @@ import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 /** Pause placement before the first mining interaction, including newly changed terrain. */
 public final class MiningGuard {
+    public static boolean forbiddenIntent(baritone.api.utils.Rotation rotation) {
+        if (!enabled()) return false;
+        if (PathingSafety.allBreakingDisabled()) return true;
+        var start = mc.player.getEyePos();
+        var direction = rotation == null ? mc.player.getRotationVec(1)
+            : net.minecraft.util.math.Vec3d.fromPolar(rotation.getPitch(), rotation.getYaw());
+        var hit = mc.world.raycast(new net.minecraft.world.RaycastContext(start,
+            start.add(direction.multiply(mc.player.getBlockInteractionRange())),
+            net.minecraft.world.RaycastContext.ShapeType.OUTLINE,
+            net.minecraft.world.RaycastContext.FluidHandling.NONE, mc.player));
+        return hit.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK
+            && PathingSafety.forbidsBreaking(mc.world.getBlockState(hit.getBlockPos()).getBlock());
+    }
+    /** Run before Movement.update prepares tools or rotations, using live blocks rather than cached terrain. */
+    public static boolean blocksMovement(baritone.api.IBaritone baritone, baritone.api.utils.BetterBlockPos[] clearance) {
+        if (!enabled()) return false;
+        if (mc.player.isInsideWall() && forbiddenIntent(null)) return true;
+        for (var pos : clearance) {
+            if (PathingSafety.forbidsBreaking(mc.world.getBlockState(pos).getBlock())
+                && !MovementHelper.a(baritone.getPlayerContext(), pos)) return true;
+        }
+        return false;
+    }
     private static final Object OWNER = new Object();
     private static int releaseAt;
     private static boolean held;
@@ -26,8 +50,7 @@ public final class MiningGuard {
         var inputs = BaritoneAPI.getProvider().getPrimaryBaritone().getInputOverrideHandler();
         if (!inputs.isInputForcedDown(Input.CLICK_LEFT)) return false;
         // Also veto execution: a previously clear path can acquire moss after calculation.
-        if ((!PathingSafety.mayBreakMoss() && mc.world.getBlockState(pos).isOf(Blocks.MOSS_BLOCK))
-            || PathingSafety.protectsSurface(mc.world.getBlockState(pos).getBlock())) {
+        if (PathingSafety.forbidsBreaking(mc.world.getBlockState(pos).getBlock())) {
             inputs.setInputForceState(Input.CLICK_LEFT, false);
             mc.interactionManager.cancelBlockBreaking();
             return true;

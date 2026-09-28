@@ -3,6 +3,6 @@
   "package": "dev.dragonsnake9000.utils.mixin",
   "compatibilityLevel": "JAVA_21",
   "refmap": "9000utils-refmap.json",
-  "client": ["RegionSearchMixin", "RegionMovementMixin", "MoveResultAccessor", "BetterBlockPosMixin", "MiningInteractionMixin", "BackgroundFpsMixin"],
+  "client": ["RegionSearchMixin", "RegionMovementMixin", "MovementBreakAccessor", "MovementStateAccessor", "MovementTargetAccessor", "MoveResultAccessor", "BetterBlockPosMixin", "MiningInteractionMixin", "BackgroundFpsMixin"],
   "injectors": {"defaultRequire": 1}
 }

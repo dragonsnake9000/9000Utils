@@ -9,6 +9,25 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Integration contracts against the shipped binary, whose implementation names are obfuscated. */
 class BaritoneBinaryTest {
+    @Test void miningIntentHookRunsBeforeRotationAndInputDispatch() throws Exception {
+        List<String> order = new ArrayList<>();
+        read("baritone/pathing/movement/Movement", new ClassVisitor(Opcodes.ASM9) {
+            @Override public MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] ex) {
+                if (!name.equals("update")) return null;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override public void visitFieldInsn(int op, String owner, String name, String desc) {
+                        if (op == Opcodes.GETFIELD && owner.equals("baritone/pathing/movement/MovementState")
+                            && name.equals("a") && desc.equals("Lbaritone/pathing/movement/MovementState$MovementTarget;")) order.add("guard");
+                    }
+                    @Override public void visitMethodInsn(int op, String owner, String name, String desc, boolean itf) {
+                        if (owner.equals("java/util/Optional") && name.equals("ofNullable")) order.add("rotation");
+                        if (owner.equals("java/util/Map") && name.equals("forEach")) order.add("inputs");
+                    }
+                };
+            }
+        });
+        assertEquals(List.of("guard", "rotation", "inputs"), order);
+    }
     private void read(String name, ClassVisitor visitor) throws Exception {
         try (ZipFile jar = new ZipFile(Path.of(System.getProperty("baritone.binary")).toFile())) {
             var entry = jar.getEntry(name + ".class");
@@ -51,6 +70,7 @@ class BaritoneBinaryTest {
             }
         });
         assertTrue(members.contains("a:Lbaritone/api/IBaritone;"));
+        assertTrue(members.contains("a:[Lbaritone/api/utils/BetterBlockPos;"));
         assertTrue(members.contains("update()Lbaritone/api/pathing/movement/MovementStatus;"));
     }
 }

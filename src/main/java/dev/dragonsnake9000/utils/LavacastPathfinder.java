@@ -110,6 +110,7 @@ public final class LavacastPathfinder extends Module {
     public boolean pauseEating() { return eatingPause.get(); }
     public int resumeDelay() { return resumeTicks.get(); }
     public boolean allowMossBreaking() { return breakMoss.get(); }
+    public boolean allowBlockBreaking() { return breakBlocks.get(); }
     public boolean supplyPing() { return ping.get(); }
     private final Setting<Boolean> keepShulkers = bool("keep-shulkers-out-of-hotbar", "Store shulkers in the main inventory except during refills. Pause placement while moving them.", true);
     public boolean keepShulkersOutOfHotbar() { return keepShulkers.get(); }
@@ -129,6 +130,7 @@ public final class LavacastPathfinder extends Module {
         syncHelpers();
     }
     @Override public void onDeactivate() {
+        ScaffoldGuard.reset();
         AutomationContext.release(this);
         cancelPath();
         RegionConstraint.bounds = null;
@@ -150,6 +152,7 @@ public final class LavacastPathfinder extends Module {
     }
     @EventHandler private void leave(GameLeftEvent event) { if (isActive()) toggle(); }
     private void resetWorld() {
+        ScaffoldGuard.reset();
         cancelPath();
         world = mc.world;
         primary.clear(); outer.clear(); scanResults.clear(); skipped.clear();

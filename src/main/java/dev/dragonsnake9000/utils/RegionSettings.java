@@ -5,7 +5,10 @@ import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.*;
 import meteordevelopment.meteorclient.gui.widgets.input.*;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WCheckbox;
+import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.settings.*;
+import net.minecraft.util.math.BlockPos;
+import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 /** Persistent settings plus coordinate controls whose slider range changes with a preset. */
 final class RegionSettings {
@@ -25,6 +28,7 @@ final class RegionSettings {
     private final Setting<Integer> band;
     private final Setting<Preset> preset;
     private final Setting<Integer> x1, y1, z1, x2, y2, z2;
+    private String captureStatus = "Camera position is used, including Freecam; coordinates round down to block positions.";
     RegionSettings(Settings settings) {
         SettingGroup group = settings.createGroup("Stay in region");
         enabled = group.add(new BoolSetting.Builder().name("stay-in-region").description("Constrain targets and Baritone movement to the selected feet-coordinate region.").defaultValue(false).build());
@@ -64,6 +68,12 @@ final class RegionSettings {
         root.clear();
         root.add(theme.label("Region coordinates (Y Only uses just Min Y / Max Y)"));
         root.add(theme.label("Middle-click a slider to focus its exact coordinate field."));
+        WHorizontalList capture = root.add(theme.horizontalList()).widget();
+        WButton first = capture.add(theme.button("Set Position 1 from Camera")).widget();
+        WButton second = capture.add(theme.button("Set Position 2 from Camera")).widget();
+        first.action = () -> { captureCamera(true); rebuild(root, theme); };
+        second.action = () -> { captureCamera(false); rebuild(root, theme); };
+        root.add(theme.label(captureStatus));
         WHorizontalList presets = root.add(theme.horizontalList()).widget();
         for (Preset option : Preset.values()) {
             presets.add(theme.label(option.label));
@@ -88,6 +98,31 @@ final class RegionSettings {
         WHorizontalList row = root.add(theme.horizontalList()).expandX().widget();
         row.add(theme.label(name)).minWidth(65);
         row.add(new CoordinateEdit(setting, min, max)).expandX();
+    }
+
+    private void captureCamera(boolean first) {
+        if (mc.world == null || mc.player == null) {
+            captureStatus = "Join a world before capturing a camera position.";
+            return;
+        }
+        // Read the rendered camera itself, not the player/camera entity: Freecam can detach it.
+        BlockPos position = BlockPos.ofFloored(mc.gameRenderer.getCamera().getPos());
+        int y = Math.max(-64, Math.min(320, position.getY()));
+        (first ? y1 : y2).set(y);
+        boolean xyz = mode.get() == Mode.XYZ;
+        if (xyz) {
+            (first ? x1 : x2).set(Math.max(-30000000, Math.min(30000000, position.getX())));
+            (first ? z1 : z2).set(Math.max(-30000000, Math.min(30000000, position.getZ())));
+            // Expand the slider preset if necessary instead of clipping a Freecam capture to 5k.
+            int required = Math.max(Math.max(Math.abs(x1.get()), Math.abs(x2.get())),
+                Math.max(Math.abs(z1.get()), Math.abs(z2.get())));
+            if (required > preset.get().limit) for (Preset option : Preset.values()) {
+                if (required <= option.limit) { preset.set(option); break; }
+            }
+        }
+        captureStatus = "Position " + (first ? "1" : "2") + ": "
+            + (xyz ? (first ? x1.get() : x2.get()) + ", " + y + ", " + (first ? z1.get() : z2.get()) : "Y = " + y)
+            + (y != position.getY() ? " (Y limited to -64 through 320)" : "");
     }
 
     /** Standard Meteor text/slider widgets, with middle-click explicitly routed to text focus. */
