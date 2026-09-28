@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'dev.dragonsnake9000'
-version = '2.2.0'
+version = '2.2.1'
 base { archivesName = '9000utils-1.21.4' }
 loom { mixin { defaultRefmapName = '9000utils-refmap.json' } }
 

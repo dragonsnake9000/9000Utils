@@ -16,6 +16,7 @@ public final class Utils9000Addon extends MeteorAddon {
         MeteorClient.EVENT_BUS.subscribe(new ActivityPause());
         MeteorClient.EVENT_BUS.subscribe(new MiningGuard());
         MeteorClient.EVENT_BUS.subscribe(new EmptyShulkerDropper());
+        MeteorClient.EVENT_BUS.subscribe(new ShulkerHotbarGuard());
     }
     @Override public void onRegisterCategories() { Modules.registerCategory(CATEGORY); }
     @Override public String getPackage() { return "dev.dragonsnake9000.utils"; }

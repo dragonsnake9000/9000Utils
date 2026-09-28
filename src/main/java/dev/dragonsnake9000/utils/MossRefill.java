@@ -89,6 +89,7 @@ public final class MossRefill extends Module {
         return isActive() && mc.player != null && ((state != State.IDLE && state != State.HOTBAR_SETTLE) || MossInventory.countMoss() == 0);
     }
     public boolean transactionActive() { return isActive() && state != State.IDLE && state != State.HOTBAR_SETTLE; }
+    public boolean placingSupplyBox() { return isActive() && state == State.WAIT_PLACE; }
 
     @Override public void onActivate() {
         AutomationContext.acquire(this);
@@ -424,6 +425,7 @@ public final class MossRefill extends Module {
         if (previousSlot >= 0 && mc.player != null && mc.interactionManager != null) InvUtils.swap(previousSlot, false);
         previousSlot = -1;
         PathingSafety.release(this);
+        ShulkerHotbarGuard.beforeRefillRelease();
         InventoryGuard.release(this);
     }
 

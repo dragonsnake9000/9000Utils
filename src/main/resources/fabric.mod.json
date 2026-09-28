@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "utils9000",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "name": "9000Utils",
   "description": "Lavacast pathfinding with block selection, region limits, moss scaffolding, activity pauses and shulker refilling.",
   "authors": ["dragonsnake9000"],

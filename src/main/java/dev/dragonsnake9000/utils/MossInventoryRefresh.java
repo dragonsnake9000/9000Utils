@@ -19,14 +19,16 @@ public final class MossInventoryRefresh extends TimedRecovery {
         if (moss < 9) {
             hotbarSlot = moss;
             inventorySlot = -1;
-            for (int i = 9; i < 36; i++) if (!mc.player.getInventory().getStack(i).isOf(Items.MOSS_BLOCK)) {
+            for (int i = 9; i < 36; i++) if (!mc.player.getInventory().getStack(i).isOf(Items.MOSS_BLOCK)
+                && (!ShulkerHotbarGuard.enabled() || !MossInventory.isShulker(mc.player.getInventory().getStack(i)))) {
                 inventorySlot = i;
                 if (mc.player.getInventory().getStack(i).isEmpty()) break;
             }
         } else {
             inventorySlot = moss;
             hotbarSlot = -1;
-            for (int i = 0; i < 9; i++) if (!mc.player.getInventory().getStack(i).isOf(Items.MOSS_BLOCK)) {
+            for (int i = 0; i < 9; i++) if (!mc.player.getInventory().getStack(i).isOf(Items.MOSS_BLOCK)
+                && (!ShulkerHotbarGuard.enabled() || !MossInventory.isShulker(mc.player.getInventory().getStack(i)))) {
                 hotbarSlot = i;
                 if (mc.player.getInventory().getStack(i).isEmpty()) break;
             }

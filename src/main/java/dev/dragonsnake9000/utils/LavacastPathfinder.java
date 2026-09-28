@@ -111,6 +111,8 @@ public final class LavacastPathfinder extends Module {
     public int resumeDelay() { return resumeTicks.get(); }
     public boolean allowMossBreaking() { return breakMoss.get(); }
     public boolean supplyPing() { return ping.get(); }
+    private final Setting<Boolean> keepShulkers = bool("keep-shulkers-out-of-hotbar", "Store shulkers in the main inventory except during refills. Pause placement while moving them.", true);
+    public boolean keepShulkersOutOfHotbar() { return keepShulkers.get(); }
     public boolean dropEmptyShulkers() { return dropEmpty.get(); }
     @Override public WWidget getWidget(GuiTheme theme) { return region.widget(theme); }
 
@@ -178,7 +180,7 @@ public final class LavacastPathfinder extends Module {
         PathingSafety.walking(this, breakBlocks.get(), scaffold.get(), breakMoss.get(), region.contours() ? targetBlocks.get() : List.of());
         MossRefill refill = Modules.get().get(MossRefill.class);
         boolean outside = bounds != null && !bounds.contains(mc.player.getBlockX(), mc.player.getBlockY(), mc.player.getBlockZ());
-        if (AutomationContext.blockedScreen() || ActivityPause.isPaused()
+        if (AutomationContext.blockedScreen() || ActivityPause.isPaused() || ShulkerHotbarGuard.busy()
             || (refill != null && refill.shouldPauseWalking() && (!outside || refill.transactionActive()))) {
             if (!paused) pauseForRefill();
             status = ActivityPause.isPaused() ? "Paused for combat/eating" : "Paused for moss refill";
