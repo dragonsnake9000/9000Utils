@@ -9,7 +9,7 @@ public final class MossInventoryRefresh extends TimedRecovery {
     private ItemStack originalInventory, originalHotbar;
 
     public MossInventoryRefresh() {
-        super("moss-inventory-refresh", "Periodically swaps moss between inventory slots and back to refresh placement.");
+        super("moss-inventory-refresh", "Periodically swaps moss between inventory slots and back to refresh placement.", 4);
     }
 
     @Override protected boolean perform() {

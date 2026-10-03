@@ -31,10 +31,29 @@ public abstract class RegionMovementMixin {
     @Shadow @Final public IBaritone a;
     @Inject(method = "update", at = @At("HEAD"), cancellable = true, require = 1)
     private void constrain(CallbackInfoReturnable<MovementStatus> result) {
+        if (dev.dragonsnake9000.utils.ActivityPause.isPaused()) {
+            a.getInputOverrideHandler().clearAllKeys();
+            result.setReturnValue(MovementStatus.RUNNING);
+            return;
+        }
         baritone.api.pathing.movement.IMovement movement = (baritone.api.pathing.movement.IMovement) (Object) this;
         BetterBlockPos src = movement.getSrc(), dest = movement.getDest();
         BetterBlockPos feet = a.getPlayerContext().playerFeet();
-        if (dev.dragonsnake9000.utils.ScaffoldGuard.abandonMovement()
+        if (!dev.dragonsnake9000.utils.ContourRoute.allows(src.x, src.y, src.z, dest.x, dest.y, dest.z)) {
+            a.getInputOverrideHandler().clearAllKeys();
+            result.setReturnValue(MovementStatus.UNREACHABLE);
+            return;
+        }
+        dev.dragonsnake9000.utils.ScaffoldPlacementPause.beforeMovement(
+            this, ((MovementBreakAccessor) (Object) this).utils9000$getPlacement());
+        int reposition = dev.dragonsnake9000.utils.ScaffoldGuard.rejected(dest.x, dest.y, dest.z) ? 2
+            : dev.dragonsnake9000.utils.ScaffoldGuard.reposition(a, src, dest);
+        if (reposition != 0) {
+            if (reposition == 2) a.getInputOverrideHandler().clearAllKeys();
+            result.setReturnValue(reposition == 1 ? MovementStatus.RUNNING : MovementStatus.UNREACHABLE);
+            return;
+        }
+        if (dev.dragonsnake9000.utils.ScaffoldGuard.abandonMovement(dest)
             || dev.dragonsnake9000.utils.MiningGuard.blocksMovement(a, ((MovementBreakAccessor) (Object) this).utils9000$getClearance())
             || !RegionConstraint.allows(src.x, src.y, src.z) || !RegionConstraint.allows(dest.x, dest.y, dest.z)
             || !RegionConstraint.allows(feet.x, feet.y, feet.z)) {

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "utils9000",
-  "version": "2.2.6",
+  "version": "2.4.10",
   "name": "9000Utils",
   "description": "Lavacast pathfinding with block selection, region limits, moss scaffolding, activity pauses and shulker refilling.",
   "authors": ["dragonsnake9000"],
@@ -20,5 +20,12 @@
     "baritone-meteor": "*"
   }
 }
+
+
+
+
+
+
+
 
 

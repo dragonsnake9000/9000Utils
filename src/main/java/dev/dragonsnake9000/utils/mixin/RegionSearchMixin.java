@@ -19,7 +19,9 @@ public abstract class RegionSearchMixin {
     private void constrain(Moves move, CalculationContext context, int x, int y, int z, MutableMoveResult result) {
         move.a(context, x, y, z, result);
         MoveResultAccessor access = (MoveResultAccessor) (Object) result;
-        if (!RegionConstraint.allows(x, y, z) || !RegionConstraint.allows(access.utils9000$getX(), access.utils9000$getY(), access.utils9000$getZ())) {
+        if (dev.dragonsnake9000.utils.ScaffoldGuard.rejected(access.utils9000$getX(), access.utils9000$getY(), access.utils9000$getZ())
+            || !dev.dragonsnake9000.utils.ContourRoute.allows(x, y, z, access.utils9000$getX(), access.utils9000$getY(), access.utils9000$getZ())
+            || !RegionConstraint.allows(x, y, z) || !RegionConstraint.allows(access.utils9000$getX(), access.utils9000$getY(), access.utils9000$getZ())) {
             access.utils9000$setCost(ActionCosts.COST_INF);
         }
     }

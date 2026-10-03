@@ -6,6 +6,8 @@ final class SurfaceSweep {
     private int anchor, sign, width;
     private double centerX, centerZ, angle;
     boolean active() { return active; }
+    double centerX() { return centerX; }
+    double centerZ() { return centerZ; }
     void reset() { active = false; }
     void begin(int y, int order, int band, double x, double z, double playerX, double playerZ) {
         active = true; anchor = y; sign = order; width = Math.max(1, band);

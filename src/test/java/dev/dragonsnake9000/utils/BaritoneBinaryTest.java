@@ -9,6 +9,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Integration contracts against the shipped binary, whose implementation names are obfuscated. */
 class BaritoneBinaryTest {
+    @Test void directInputPauseHooksExistInPinnedBinary() throws Exception {
+        Set<String> methods = new HashSet<>();
+        read("baritone/utils/InputOverrideHandler", new ClassVisitor(Opcodes.ASM9) {
+            @Override public MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] ex) {
+                methods.add(name + desc); return null;
+            }
+        });
+        assertTrue(methods.contains("setInputForceState(Lbaritone/api/utils/input/Input;Z)V"));
+        assertTrue(methods.contains("onTick(Lbaritone/api/event/events/TickEvent;)V"));
+        assertTrue(methods.contains("clearAllKeys()V"));
+    }
     @Test void miningIntentHookRunsBeforeRotationAndInputDispatch() throws Exception {
         List<String> order = new ArrayList<>();
         read("baritone/pathing/movement/Movement", new ClassVisitor(Opcodes.ASM9) {
@@ -71,6 +82,7 @@ class BaritoneBinaryTest {
         });
         assertTrue(members.contains("a:Lbaritone/api/IBaritone;"));
         assertTrue(members.contains("a:[Lbaritone/api/utils/BetterBlockPos;"));
+        assertTrue(members.contains("c:Lbaritone/api/utils/BetterBlockPos;"));
         assertTrue(members.contains("update()Lbaritone/api/pathing/movement/MovementStatus;"));
     }
 }

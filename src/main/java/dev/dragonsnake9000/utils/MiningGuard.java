@@ -47,6 +47,7 @@ public final class MiningGuard {
     }
     public static boolean beforeBreak(BlockPos pos) {
         if (!enabled()) return false;
+        if (ActivityPause.isPaused()) return true;
         var inputs = BaritoneAPI.getProvider().getPrimaryBaritone().getInputOverrideHandler();
         if (!inputs.isInputForcedDown(Input.CLICK_LEFT)) return false;
         // Also veto execution: a previously clear path can acquire moss after calculation.

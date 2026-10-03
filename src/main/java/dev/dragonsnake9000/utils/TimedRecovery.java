@@ -9,8 +9,7 @@ import meteordevelopment.orbit.EventHandler;
 
 abstract class TimedRecovery extends Module {
     protected final SettingGroup general = settings.getDefaultGroup();
-    private final Setting<Integer> interval = general.add(new IntSetting.Builder().name("interval-seconds")
-        .description("Time between recovery attempts, at 20 game ticks per second.").defaultValue(10).range(1, 86400).sliderRange(1, 120).build());
+    private final Setting<Integer> interval;
     private final Setting<Boolean> onlyWalking = general.add(new BoolSetting.Builder().name("only-while-walker-enabled")
         .description("Only run while Lavacast Pathfinder is enabled.").defaultValue(true).build());
     protected final Setting<Integer> settle = general.add(new IntSetting.Builder().name("action-delay-ticks")
@@ -18,8 +17,10 @@ abstract class TimedRecovery extends Module {
     private int timer, busyTicks;
     private boolean busy;
 
-    TimedRecovery(String name, String description) {
+    TimedRecovery(String name, String description, int defaultInterval) {
         super(Utils9000Addon.CATEGORY, name, description);
+        interval = general.add(new IntSetting.Builder().name("interval-seconds")
+            .description("Time between recovery attempts, at 20 game ticks per second.").defaultValue(defaultInterval).range(1, 86400).sliderRange(1, 120).build());
         runInMainMenu = true;
     }
     @Override public void onActivate() { timer = interval.get() * 20; busy = false; }

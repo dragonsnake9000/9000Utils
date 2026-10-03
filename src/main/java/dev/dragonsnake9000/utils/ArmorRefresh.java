@@ -10,7 +10,7 @@ import net.minecraft.util.Hand;
 public final class ArmorRefresh extends TimedRecovery {
     private int previousSlot = -1;
     public ArmorRefresh() {
-        super("moss-armor-refresh", "Periodically uses hotbar armor or elytra to refresh moss placement. Changes equipped gear.");
+        super("moss-armor-refresh", "Periodically uses hotbar armor or elytra to refresh moss placement. Changes equipped gear.", 5);
     }
     @Override protected boolean perform() {
         for (int i = 0; i < 9; i++) {

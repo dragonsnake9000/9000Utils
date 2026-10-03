@@ -23,42 +23,53 @@ public final class LavacastPathfinder extends Module {
     private final SettingGroup general = settings.getDefaultGroup();
     private final Setting<List<Block>> targetBlocks = general.add(new BlockListSetting.Builder().name("target-blocks")
         .description("Blocks to visit. Neighbors count any selected block. Change this list at any time.")
-        .defaultValue(Blocks.COBBLESTONE).onChanged(value -> resetTargets()).build());
-    private final Setting<Integer> radius = integer("scan-radius", "Primary working radius. Nearby work always wins over the fallback radius.", 12, 1, 256);
-    private final Setting<Integer> fallbackRadius = integer("fallback-scan-radius", "Expanded search radius after local work runs out; never smaller than the primary radius.", 64, 1, 512);
-    private final Setting<Integer> fallbackDelay = integer("fallback-delay-seconds", "Seconds without eligible primary-radius work before expanding.", 5, 0, 3600);
+        .defaultValue(Blocks.COBBLESTONE, Blocks.OBSIDIAN, Blocks.CRYING_OBSIDIAN).onChanged(value -> resetTargets()).build());
+    private final Setting<Integer> radius = integer("scan-radius", "Primary working radius. Nearby work always wins over the fallback radius.", 30, 1, 256);
+    private final Setting<Integer> fallbackRadius = integer("fallback-scan-radius", "Expanded search radius after local work runs out; never smaller than the primary radius.", 100, 1, 512);
+    private final Setting<Integer> fallbackDelay = integer("fallback-delay-seconds", "Seconds without eligible primary-radius work before expanding.", 3, 0, 3600);
     private final Setting<Integer> vertical = integer("vertical-range", "Search above and below your feet, within world limits.", 16, 0, 1024);
-    private final Setting<Integer> air = integer("air-blocks", "Required air column; 0 removes the extra height requirement, but the top must still be air.", 10, 0, 1024);
+    private final Setting<Integer> air = integer("air-blocks", "Required air column; 0 removes the extra height requirement, but the top must still be air.", 30, 0, 1024);
     private final Setting<Boolean> snow = general.add(new BoolSetting.Builder().name("allow-snow-layers")
         .description("Allow a snow-layer block directly above a target. Other clearance must still be air; does not include snow blocks or powder snow.")
-        .defaultValue(false).onChanged(value -> resetTargets()).build());
-    private final Setting<Integer> neighbors = integer("minimum-neighbors", "Required selected-block neighbors among all 26 adjacent positions. Zero allows isolated blocks.", 2, 0, 10);
+        .defaultValue(true).onChanged(value -> resetTargets()).build());
+    private final Setting<Integer> neighbors = integer("minimum-neighbors", "Required selected-block neighbors among all 26 adjacent positions. Zero allows isolated blocks.", 3, 0, 10);
     private final Setting<Double> clusterWeight = general.add(new DoubleSetting.Builder().name("cluster-preference")
         .description("How strongly dense target-block patches improve the distance score. Zero chooses by distance only.")
-        .defaultValue(1).range(0, 10).sliderRange(0, 3).build());
-    private final Setting<Integer> refresh = integer("refresh-ticks", "Delay between scan cycles; scanning does not cancel paths.", 1, 0, 1200);
+        .defaultValue(1.4430955993930203).range(0, 10).sliderRange(0, 3).build());
+    private final Setting<Integer> refresh = integer("refresh-ticks", "Delay between scan cycles; scanning does not cancel paths.", 2, 0, 1200);
     private final Setting<Integer> scanBudget = integer("scan-budget", "Maximum block positions checked per tick; large radii take multiple ticks.", 8192, 256, 131072);
-    private final Setting<Integer> goalDelay = integer("goal-command-delay-ticks", "Minimum spacing between new Baritone goals. Zero still limits dispatch to once per tick.", 10, 0, 1200);
-    private final Setting<Integer> reconsider = integer("retarget-ticks", "Reconsider a better nearby target at this interval, without resending unchanged goals.", 20, 1, 1200);
+    private final Setting<Integer> goalDelay = integer("goal-command-delay-ticks", "Minimum spacing between new Baritone goals. Zero still limits dispatch to once per tick.", 2, 0, 1200);
+    private final Setting<Integer> reconsider = integer("retarget-ticks", "Reconsider a better nearby target at this interval, without resending unchanged goals.", 10, 1, 1200);
     private final Setting<Integer> improvement = integer("switch-improvement-percent", "A new target must score this much better to interrupt a working path.", 25, 0, 95);
     private final Setting<Integer> maxAttempt = integer("max-target-seconds", "Abandon a target after this much active time, even while moving. Zero disables the limit.", 12, 0, 3600);
-    private final Setting<Integer> stall = integer("stuck-timeout-seconds", "Abandon targets without meaningful progress toward them. Zero disables this check.", 4, 0, 3600);
-    private final Setting<Integer> failedDelay = integer("failed-target-cooldown-seconds", "Temporarily ignore failed, stuck, overlong, or excessively indirect targets.", 60, 0, 86400);
-    private final Setting<Integer> revisit = integer("revisit-delay-seconds", "Skip reached targets for this long.", 60, 0, 86400);
+    private final Setting<Integer> stall = integer("stuck-timeout-seconds", "Abandon targets without meaningful progress toward them. Zero disables this check.", 2, 0, 3600);
+    private final Setting<Integer> failedDelay = integer("failed-target-cooldown-seconds", "Temporarily ignore failed, stuck, overlong, or excessively indirect targets.", 30, 0, 86400);
+    private final Setting<Integer> revisit = integer("revisit-delay-seconds", "Skip reached targets for this long.", 58, 0, 86400);
     private final Setting<Double> detourRatio = general.add(new DoubleSetting.Builder().name("max-detour-ratio")
         .description("Reject routes much longer than the direct distance (with 12 blocks of tolerance). Zero disables this check.")
         .defaultValue(2.5).range(0, 100).sliderRange(0, 10).build());
-    private final Setting<Boolean> breakBlocks = bool("allow-break", "Allow Baritone to break blocks to escape holes and navigate.", true);
+    private final Setting<Boolean> breakBlocks = bool("allow-break", "Allow Baritone to break blocks to escape holes and navigate.", false);
     private final Setting<Boolean> scaffold = bool("moss-scaffold", "Allow Baritone to build paths using only moss blocks from the hotbar.", true);
     private final Setting<Boolean> combatPause = bool("pause-for-killaura", "Pause movement, placing, refilling and recovery while KillAura attacks.", true);
     private final Setting<Boolean> eatingPause = bool("pause-for-eating", "Pause movement, placing, refilling and recovery while eating or drinking.", true);
-    private final Setting<Integer> resumeTicks = integer("activity-resume-delay-ticks", "Quiet time after eating/combat before automation resumes.", 20, 0, 1200);
+    private final Setting<Integer> resumeTicks = integer("activity-resume-delay-ticks", "Quiet time after eating/combat before automation resumes.", 15, 0, 1200);
     private final Setting<Boolean> breakMoss = bool("allow-break-moss", "Allow moss mining; pause Sleepy's placer during breaking and for half a second afterward.", false);
-    private final Setting<Boolean> ping = bool("out-of-moss-ping", "Play the arrow-hit sound when all moss supplies run out.", false);
-    private final Setting<Boolean> dropEmpty = bool("drop-empty-shulkers", "Throw out truly empty inventory shulkers only while this pathfinder is active.", false);
-    private final Setting<Boolean> restart = bool("periodic-restart", "Periodically stop the current path and choose a fresh target without clearing failed-target memory.", false);
+    private final Setting<Boolean> escapeMoss = bool("emergency-moss-escape", "When confined to a small connected space, clear a moss exit into a larger area, even with normal breaking disabled.", true);
+    private final Setting<Integer> escapeSpace = general.add(new IntSetting.Builder().name("moss-escape-reachable-blocks")
+        .description("Maximum unique reachable standing positions across all directions to count as trapped. Revisiting a position does not increase this count.")
+        .defaultValue(20).range(1, 500).sliderRange(1, 100).visible(escapeMoss::get).build());
+    private final Setting<Boolean> eatingRecovery = bool("eating-inventory-recovery", "If eating consumes no food for five seconds, open your inventory for recovery. Requires Pause for Eating. Maximum three retries per stalled episode.", false);
+    private final Setting<Boolean> eatingKeepOpen = general.add(new BoolSetting.Builder().name("keep-inventory-open-while-eating")
+        .description("Once recovery opens inventory, keep it open until eating finishes, instead of using a fixed duration.")
+        .defaultValue(false).visible(eatingRecovery::get).build());
+    private final Setting<Integer> eatingOpenTicks = general.add(new IntSetting.Builder().name("eating-inventory-open-ticks")
+        .description("How many ticks recovery keeps inventory open. 20 ticks is about one second.")
+        .defaultValue(2).range(1, 1200).sliderRange(1, 200).visible(() -> eatingRecovery.get() && !eatingKeepOpen.get()).build());
+    private final Setting<Boolean> ping = bool("out-of-moss-ping", "Play the arrow-hit sound when all moss supplies run out.", true);
+    private final Setting<Boolean> dropEmpty = bool("drop-empty-shulkers", "Throw out truly empty inventory shulkers only while this pathfinder is active.", true);
+    private final Setting<Boolean> restart = bool("periodic-restart", "Periodically stop the current path and choose a fresh target without clearing failed-target memory.", true);
     private final Setting<Integer> restartSeconds = general.add(new IntSetting.Builder().name("restart-interval-seconds")
-        .description("Time between stop/start cycles; zero disables the timer.").defaultValue(10).range(0, 100).sliderRange(0, 100).visible(restart::get).build());
+        .description("Time between stop/start cycles; zero disables the timer.").defaultValue(3).range(0, 100).sliderRange(0, 100).visible(restart::get).build());
     private final Setting<Boolean> helperRefill = bool("enable-moss-refill", "Enable the shulker refill module with this pathfinder.", true);
     private final Setting<Boolean> helperArmor = bool("enable-armor-refresh", "Enable armor refresh with this pathfinder.", true);
     private final Setting<Boolean> helperInventory = bool("enable-inventory-refresh", "Enable the inventory refresh module with this pathfinder.", true);
@@ -73,6 +84,9 @@ public final class LavacastPathfinder extends Module {
     private long entrySince;
     private boolean outsideNotified;
     private final SurfaceSweep sweep = new SurfaceSweep();
+    private int peakY = Integer.MIN_VALUE, peakCount;
+    private double peakX, peakZ;
+    private int lastHorizontal;
     private boolean outerSweepReady, lastContours;
     private int lastBand;
 
@@ -111,6 +125,14 @@ public final class LavacastPathfinder extends Module {
     public int resumeDelay() { return resumeTicks.get(); }
     public boolean allowMossBreaking() { return breakMoss.get(); }
     public boolean allowBlockBreaking() { return breakBlocks.get(); }
+    public boolean emergencyMossEscape() { return escapeMoss.get(); }
+    public int mossEscapeReachableBlocks() { return escapeSpace.get(); }
+    public boolean eatingInventoryRecovery() { return eatingRecovery.get(); }
+    private final Setting<Boolean> gappleShuffle = bool("gapple-inventory-refresh", "Once per eating episode, move the selected hotbar golden apple into an empty main-inventory slot and immediately back. Requires Pause for Eating. Supports enchanted golden apples.", false);
+    public boolean gappleInventoryRefresh() { return gappleShuffle.get(); }
+    public boolean eatingKeepOpen() { return eatingKeepOpen.get(); }
+    public int eatingOpenTicks() { return eatingOpenTicks.get(); }
+    public void renderRegion(meteordevelopment.meteorclient.events.render.Render3DEvent event) { region.render(event); }
     public boolean supplyPing() { return ping.get(); }
     private final Setting<Boolean> keepShulkers = bool("keep-shulkers-out-of-hotbar", "Store shulkers in the main inventory except during refills. Pause placement while moving them.", true);
     public boolean keepShulkersOutOfHotbar() { return keepShulkers.get(); }
@@ -130,7 +152,9 @@ public final class LavacastPathfinder extends Module {
         syncHelpers();
     }
     @Override public void onDeactivate() {
+        MossEscape.reset();
         ScaffoldGuard.reset();
+        ScaffoldPlacementPause.reset();
         AutomationContext.release(this);
         cancelPath();
         RegionConstraint.bounds = null;
@@ -152,6 +176,8 @@ public final class LavacastPathfinder extends Module {
     }
     @EventHandler private void leave(GameLeftEvent event) { if (isActive()) toggle(); }
     private void resetWorld() {
+        ScaffoldPlacementPause.reset();
+        peakY = Integer.MIN_VALUE; peakCount = 0; peakX = peakZ = 0;
         ScaffoldGuard.reset();
         cancelPath();
         world = mc.world;
@@ -170,9 +196,10 @@ public final class LavacastPathfinder extends Module {
         syncHelpers();
         RegionBounds bounds = region.snapshot();
         RegionConstraint.bounds = bounds;
-        if (!Objects.equals(lastBounds, bounds) || lastOrder != region.orderSign()
+        if (!Objects.equals(lastBounds, bounds) || lastOrder != region.orderSign() || lastHorizontal != region.horizontalSignature()
             || lastContours != region.contours() || lastBand != region.bandHeight()) {
             lastBounds = bounds; lastOrder = region.orderSign(); resetTargets();
+            lastHorizontal = region.horizontalSignature();
             lastContours = region.contours(); lastBand = region.bandHeight();
             entryTarget = null; outsideNotified = false; RegionConstraint.entryCorridor = null;
         }
@@ -183,7 +210,7 @@ public final class LavacastPathfinder extends Module {
         PathingSafety.walking(this, breakBlocks.get(), scaffold.get(), breakMoss.get(), region.contours() ? targetBlocks.get() : List.of());
         MossRefill refill = Modules.get().get(MossRefill.class);
         boolean outside = bounds != null && !bounds.contains(mc.player.getBlockX(), mc.player.getBlockY(), mc.player.getBlockZ());
-        if (AutomationContext.blockedScreen() || ActivityPause.isPaused() || ShulkerHotbarGuard.busy()
+        if (AutomationContext.blockedScreen() || ActivityPause.isPaused() || ShulkerHotbarGuard.busy() || MossEscape.busy()
             || (refill != null && refill.shouldPauseWalking() && (!outside || refill.transactionActive()))) {
             if (!paused) pauseForRefill();
             status = ActivityPause.isPaused() ? "Paused for combat/eating" : "Paused for moss refill";
@@ -256,8 +283,16 @@ public final class LavacastPathfinder extends Module {
         scanWait = 0;
     }
     private void dispatch(BlockPos pos) {
+        pos = advanceHorizontalGoal(pos);
         if (!commands.canDispatch(ticks, pos, goalDelay.get())) return;
         // Do not toggle the module: preserve failed-target memory and settings ownership.
+        if (region.contours() && sweep.active()) {
+            double cx = sweep.centerX(), cz = sweep.centerZ();
+            double fromRadius = Math.hypot(mc.player.getX() - cx, mc.player.getZ() - cz);
+            double toRadius = Math.hypot(pos.getX() + .5 - cx, pos.getZ() + .5 - cz);
+            ContourRoute.current = new ContourRoute(cx, cz, Math.max(0, Math.min(fromRadius, toRadius) - 2),
+                Math.max(mc.player.getBlockY(), goalFor(pos).getY()) + 1);
+        } else ContourRoute.current = null;
         NavigationTransport.go(goalFor(pos));
         if (region.contours()) sweep.selected(pos.getX() + .5, pos.getZ() + .5);
         commands.dispatched(ticks, pos);
@@ -267,12 +302,36 @@ public final class LavacastPathfinder extends Module {
         status = (within(pos, radius.get()) ? "Local " : "Expanded ") + pos.toShortString();
     }
     private boolean shouldSwitch(Candidate next) {
+        if (region.horizontal()) return false; // Finish this route rather than bounce between rings.
         if (next.pos.equals(target)) return false;
         if (region.orderSign() != 0 && next.pos.getY() != target.getY())
             return region.orderSign() * Integer.compare(next.pos.getY(), target.getY()) < 0;
         if (within(next.pos, radius.get()) && !within(target, radius.get())) return true;
         double current = TargetRules.score(distance(target), neighborCount(target), clusterWeight.get());
         return score(next) < current * (1 - improvement.get() / 100.0);
+    }
+    /** Step into the fresh side of a moss boundary rather than stopping directly on its rim. */
+    private BlockPos advanceHorizontalGoal(BlockPos boundary) {
+        int advance = region.goalAdvance();
+        if (advance == 0) return boundary;
+        double mossX = 0, mossZ = 0; int count = 0;
+        for (int x = -3; x <= 3; x++) for (int z = -3; z <= 3; z++) {
+            var cover = boundary.add(x, 1, z);
+            if (world.isChunkLoaded(cover.getX() >> 4, cover.getZ() >> 4) && world.getBlockState(cover).isOf(Blocks.MOSS_BLOCK)) {
+                mossX += x; mossZ += z; count++;
+            }
+        }
+        if (count == 0) return boundary;
+        double length = Math.hypot(mossX, mossZ);
+        if (length < .01) return boundary;
+        BlockPos best = boundary;
+        for (int step = 1; step <= advance; step++) {
+            BlockPos next = boundary.add((int) Math.round(-mossX / length * step), 0, (int) Math.round(-mossZ / length * step));
+            if (skipped.containsKey(next) || !eligible(next) || neighborCount(next) < neighbors.get()
+                || !within(next, Math.max(radius.get(), fallbackRadius.get()))) break;
+            best = next;
+        }
+        return best;
     }
     private Candidate chooseTarget() {
         if (region.contours() && !sweep.active()) {
@@ -323,6 +382,9 @@ public final class LavacastPathfinder extends Module {
     private boolean better(Candidate next, Candidate old) {
         if (!region.contours() && region.orderSign() != 0 && next.pos.getY() != old.pos.getY())
             return region.orderSign() * Integer.compare(next.pos.getY(), old.pos.getY()) < 0;
+        double nextRing = region.horizontalRank(next.pos.getX(), next.pos.getZ());
+        double oldRing = region.horizontalRank(old.pos.getX(), old.pos.getZ());
+        if (nextRing != oldRing) return nextRing < oldRing;
         return score(next) < score(old);
     }
     private double distance(BlockPos pos) { return mc.player.getPos().distanceTo(Vec3d.ofBottomCenter(goalFor(pos))); }
@@ -363,6 +425,15 @@ public final class LavacastPathfinder extends Module {
             }
             cursor.set(x, minY + (int) (scanIndex % height), z);
             scanIndex++;
+            if (region.contours() && (lastBounds == null || lastBounds.contains(x, cursor.getY() + 1, z))
+                && targetBlocks.get().contains(world.getBlockState(cursor).getBlock())) {
+                var cover = world.getBlockState(cursor.up());
+                if (cover.isAir() || cover.isOf(Blocks.MOSS_BLOCK) || cover.isOf(Blocks.SNOW)) {
+                    // The cone's highest visible surface estimates its axis even after the peak is mossed.
+                    if (cursor.getY() > peakY) { peakY = cursor.getY(); peakCount = 0; peakX = peakZ = 0; }
+                    if (cursor.getY() == peakY && peakCount < 1_000_000) { peakCount++; peakX += x + .5; peakZ += z + .5; }
+                }
+            }
             if (skipped.containsKey(cursor) || !eligible(cursor) || baritone.getPlayerContext().playerFeet().equals(goalFor(cursor))) continue;
             int count = neighborCount(cursor);
             if (count >= neighbors.get()) {
@@ -370,6 +441,7 @@ public final class LavacastPathfinder extends Module {
                     + TargetRules.score(scanOrigin.distanceTo(Vec3d.ofBottomCenter(cursor.up())), count, scanWeight);
                 if (region.contours() && sweep.active()) rank = (sweep.accepts(cursor.getY()) ? 0 : 1_000_000_000.0)
                     + sweep.rank(cursor.getX() + .5, cursor.getZ() + .5, TargetRules.score(scanOrigin.distanceTo(Vec3d.ofBottomCenter(cursor.up())), count, scanWeight));
+                rank += region.horizontalRank(cursor.getX(), cursor.getZ()) * 100_000;
                 Candidate candidate = new Candidate(cursor.toImmutable(), count, rank);
                 // Keep memory and selection work bounded even with a 512-block fallback radius.
                 if (scanResults.size() < 4096) scanResults.add(candidate);
@@ -415,6 +487,7 @@ public final class LavacastPathfinder extends Module {
         cancelPath(); target = null; entryTarget = null; scanning = false; paused = true;
     }
     private void cancelPath() {
+        ContourRoute.current = null;
         if (baritone != null && ownsGoal) NavigationTransport.stop();
         ownsGoal = false; commands.clear();
     }
@@ -422,6 +495,7 @@ public final class LavacastPathfinder extends Module {
 
     /** Invalidate cached selections immediately after a whitelist or region edit. */
     private void resetTargets() {
+        peakY = Integer.MIN_VALUE; peakCount = 0; peakX = peakZ = 0;
         cancelPath(); target = null; scanning = false; scanWait = 0; emptySince = -1;
         if (primary != null) { primary.clear(); outer.clear(); scanResults.clear(); skipped.clear(); }
         if (sweep != null) sweep.reset();
@@ -439,7 +513,7 @@ public final class LavacastPathfinder extends Module {
             int count = neighborCount(pos);
             if (count < neighbors.get()) continue;
             if (best == null || region.orderSign() * Integer.compare(pos.getY(), best.pos.getY()) < 0
-                || (pos.getY() == best.pos.getY() && distance(pos) < distance(best.pos))) best = new Candidate(pos, count);
+                || (pos.getY() == best.pos.getY() && better(new Candidate(pos, count), best))) best = new Candidate(pos, count);
         }
         return best;
     }
@@ -453,7 +527,8 @@ public final class LavacastPathfinder extends Module {
         positions.add(seed.pos);
         double x = 0, z = 0;
         for (BlockPos pos : positions) { x += pos.getX() + .5; z += pos.getZ() + .5; }
-        sweep.begin(anchor, sign, band, x / positions.size(), z / positions.size(), mc.player.getX(), mc.player.getZ());
+        sweep.begin(anchor, sign, band, peakCount > 0 ? peakX / peakCount : x / positions.size(),
+            peakCount > 0 ? peakZ / peakCount : z / positions.size(), mc.player.getX(), mc.player.getZ());
         outerSweepReady = false; emptySince = -1;
     }
     private void syncHelpers() {
@@ -507,6 +582,7 @@ public final class LavacastPathfinder extends Module {
         RegionConstraint.entryCorridor = RegionBounds.normalized(
             Math.min(feet.getX(), best.getX()) - 8, Math.max(world.getBottomY(), Math.min(feet.getY(), best.getY()) - 8), Math.min(feet.getZ(), best.getZ()) - 8,
             Math.max(feet.getX(), best.getX()) + 8, Math.min(world.getTopYInclusive(), Math.max(feet.getY(), best.getY()) + 8), Math.max(feet.getZ(), best.getZ()) + 8);
+        ContourRoute.current = null;
         NavigationTransport.go(best); commands.dispatched(ticks, best);
         entryTarget = best; entrySince = ticks; ownsGoal = true; status = "Returning to region";
     }

@@ -15,6 +15,11 @@ public abstract class MiningInteractionMixin {
     private void beforePlace(net.minecraft.client.network.ClientPlayerEntity player, net.minecraft.util.Hand hand,
                              net.minecraft.util.hit.BlockHitResult hit,
                              CallbackInfoReturnable<net.minecraft.util.ActionResult> result) {
+        if (dev.dragonsnake9000.utils.ActivityPause.isPaused()) {
+            // PASS allows vanilla to fall through to using the food in hand when aiming at a block.
+            result.setReturnValue(net.minecraft.util.ActionResult.PASS);
+            return;
+        }
         if (dev.dragonsnake9000.utils.ShulkerHotbarGuard.blockPlacement(hand)
             || dev.dragonsnake9000.utils.ScaffoldGuard.beforePlace(hand, hit))
             result.setReturnValue(net.minecraft.util.ActionResult.FAIL);

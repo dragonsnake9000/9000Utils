@@ -39,9 +39,9 @@ public final class MossRefill extends Module {
     enum State { IDLE, HOTBAR_SETTLE, SETTLE, PREPARE, SELECT, PLACE, WAIT_PLACE, OPEN, WAIT_OPEN, TRANSFER, MERGE_CARRY, MERGE_RETURN, WAIT_TRANSFER, CLOSE, MINE, PICKUP, CAP_SELECT, CAP_AIM, CAP_ROUTE, CAP_PLACE, CAP_WAIT, FINISH, FAILED }
     private final SettingGroup general = settings.getDefaultGroup();
     private final Setting<Integer> delay = general.add(new IntSetting.Builder().name("action-delay-ticks")
-        .description("Ticks between inventory and interaction actions. Raise for laggy servers.").defaultValue(6).range(0, 1200).sliderRange(0, 40).build());
+        .description("Ticks between inventory and interaction actions. Raise for laggy servers.").defaultValue(2).range(0, 1200).sliderRange(0, 40).build());
     private final Setting<Integer> timeout = general.add(new IntSetting.Builder().name("step-timeout-seconds")
-        .description("Stop for manual recovery if a refill step cannot complete.").defaultValue(30).range(1, 3600).sliderRange(1, 120).build());
+        .description("Stop for manual recovery if a refill step cannot complete.").defaultValue(15).range(1, 3600).sliderRange(1, 120).build());
     private final Setting<Boolean> onlyWalking = general.add(new BoolSetting.Builder().name("only-while-walker-enabled")
         .description("Start automatic refills only when Lavacast Pathfinder is enabled.").defaultValue(true).build());
     private final Setting<Boolean> replenish = general.add(new BoolSetting.Builder().name("replenish-hotbar")
@@ -90,6 +90,9 @@ public final class MossRefill extends Module {
     }
     public boolean transactionActive() { return isActive() && state != State.IDLE && state != State.HOTBAR_SETTLE; }
     public boolean placingSupplyBox() { return isActive() && state == State.WAIT_PLACE; }
+    public boolean openingSupplyBox(BlockPos position) {
+        return isActive() && (state == State.OPEN || state == State.WAIT_OPEN) && position.equals(placedPos);
+    }
 
     @Override public void onActivate() {
         AutomationContext.acquire(this);
