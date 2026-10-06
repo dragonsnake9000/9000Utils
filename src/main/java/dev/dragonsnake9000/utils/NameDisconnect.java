@@ -16,6 +16,9 @@ import java.util.HashMap;
 import java.util.Map;
 import net.minecraft.entity.decoration.EndCrystalEntity;
 import net.minecraft.registry.tag.DamageTypeTags;
+import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.widgets.WWidget;
+import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
 
 /** Checks loaded world entities, never merely the server-wide tab list. */
 public final class NameDisconnect extends Module {
@@ -23,7 +26,9 @@ public final class NameDisconnect extends Module {
     enum Weapons { Sword, Mace, Both }
     private final SettingGroup general = settings.getDefaultGroup();
     private final Setting<List<String>> names = general.add(new StringListSetting.Builder().name("player-names")
-        .description("Exact Minecraft account names, case-insensitive. Listed names override friend status.").defaultValue(List.of()).build());
+        .description("Exact Minecraft account names, case-insensitive. Listed names override friend status.").defaultValue(List.of()).visible(() -> false).build());
+    private final Setting<List<String>> reasons = general.add(new StringListSetting.Builder().name("player-reasons")
+        .description("Saved username-to-reason pairs, edited with the player rows below.").defaultValue(List.of()).visible(() -> false).build());
     private final Setting<Detection> detection = general.add(new EnumSetting.Builder<Detection>().name("detection")
         .description("Render Distance checks all loaded players, even behind walls. Line Of Sight additionally requires visibility from your player.").defaultValue(Detection.Render_Distance).build());
     private final Setting<Boolean> learnAttackers = general.add(new BoolSetting.Builder().name("auto-add-attackers")
@@ -53,6 +58,52 @@ public final class NameDisconnect extends Module {
     }
     public NameDisconnect() { super(Utils9000Addon.CATEGORY, "name-disconnect", "Disconnects when a listed player is loaded nearby or visible."); }
 
+    @Override public WWidget getWidget(GuiTheme theme) {
+        WTable table = theme.table();
+        fillPlayers(theme, table);
+        return table;
+    }
+    private void fillPlayers(GuiTheme theme, WTable table) {
+        table.clear();
+        table.add(theme.label("Username")).expandX();
+        table.add(theme.label("Reason"));
+        table.row();
+        for (int i = 0; i < names.get().size(); i++) {
+            final int index = i;
+            String[] saved = { names.get().get(i) };
+            var nameBox = table.add(theme.textBox(saved[0])).minWidth(180).expandX().widget();
+            var reasonBox = table.add(theme.dropdown(PlayerReasons.get(reasons.get(), saved[0]))).widget();
+            Runnable save = () -> {
+                // An external list edit must not make an old GUI row overwrite another name.
+                if (index >= names.get().size() || !names.get().get(index).equals(saved[0])) return;
+                String name = nameBox.get().trim();
+                var updated = new ArrayList<>(names.get());
+                updated.set(index, name);
+                names.set(updated);
+                if (!PlayerNameList.matches(updated, saved[0]))
+                    reasons.set(PlayerReasons.set(reasons.get(), saved[0], PlayerReasons.Reason.undefined));
+                reasons.set(PlayerReasons.set(reasons.get(), name, reasonBox.get()));
+                saved[0] = name;
+            };
+            nameBox.actionOnUnfocused = save;
+            reasonBox.action = save;
+            var remove = table.add(theme.minus()).widget();
+            remove.action = () -> {
+                if (index < names.get().size() && names.get().get(index).equals(saved[0])) {
+                    var updated = new ArrayList<>(names.get()); updated.remove(index); names.set(updated);
+                    if (!PlayerNameList.matches(updated, saved[0]))
+                        reasons.set(PlayerReasons.set(reasons.get(), saved[0], PlayerReasons.Reason.undefined));
+                }
+                fillPlayers(theme, table);
+            };
+            table.row();
+        }
+        var add = table.add(theme.button("Add Player")).widget();
+        add.action = () -> { var updated = new ArrayList<>(names.get()); updated.add(""); names.set(updated); fillPlayers(theme, table); };
+        var refresh = table.add(theme.button("Refresh List")).widget();
+        refresh.action = () -> fillPlayers(theme, table);
+    }
+
     /** Called on the client thread after vanilla handles a server damage notification. */
     public void observeDamage(EntityDamageS2CPacket packet) {
         if (!isActive() || (!learnAttackers.get() && !learnCrystals.get()) || mc.player == null || mc.world == null
@@ -65,7 +116,7 @@ public final class NameDisconnect extends Module {
         boolean crystal = direct instanceof EndCrystalEntity
             || (direct == null && removedCrystals.containsKey(packet.sourceDirectId()));
         if (learnCrystals.get() && damage.isIn(DamageTypeTags.IS_EXPLOSION) && crystal) {
-            addAttacker(attacker, "crystal explosion");
+            addAttacker(attacker, PlayerReasons.Reason.crystal);
             return;
         }
         // Require direct player melee damage: arrows, thorns and explosions cannot learn a name.
@@ -76,15 +127,16 @@ public final class NameDisconnect extends Module {
         boolean mace = smash || held.isOf(Items.MACE);
         boolean sword = !smash && held.isIn(ItemTags.SWORDS);
         if (!(mace && weapons.get() != Weapons.Sword || sword && weapons.get() != Weapons.Mace)) return;
-        addAttacker(attacker, mace ? "mace hit" : "sword hit");
+        addAttacker(attacker, mace ? PlayerReasons.Reason.mace : PlayerReasons.Reason.sword);
     }
-    private void addAttacker(PlayerEntity attacker, String cause) {
+    private void addAttacker(PlayerEntity attacker, PlayerReasons.Reason cause) {
         String name = attacker.getGameProfile().getName();
+        reasons.set(PlayerReasons.set(reasons.get(), name, cause));
         if (PlayerNameList.matches(names.get(), name)) return;
         var updated = new ArrayList<>(names.get());
         updated.add(name);
         names.set(updated);
-        info("Added %s to Name Disconnect after a %s.", name, cause);
+        info("Added %s to Name Disconnect. Reason: %s.", name, cause);
     }
     @EventHandler(priority = 1100) private void tick(TickEvent.Post event) {
         refreshCrystals();
@@ -93,8 +145,15 @@ public final class NameDisconnect extends Module {
             if (player == mc.player || player.getUuid().equals(mc.player.getUuid()) || !player.isAlive()
                 || !PlayerNameList.matches(names.get(), player.getGameProfile().getName())) continue;
             if (detection.get() == Detection.Line_Of_Sight && !mc.player.canSee(player)) continue;
-            String reason = "9000Utils: Name Disconnect\nListed player: " + player.getGameProfile().getName()
-                + "\nReason: " + (detection.get() == Detection.Line_Of_Sight ? "player entered line of sight" : "player entered loaded render range")
+            String reason = "Account: " + mc.player.getGameProfile().getName()
+                + "\n9000Utils: Name Disconnect\nListed player: " + player.getGameProfile().getName()
+                + "\nReason: " + PlayerReasons.get(reasons.get(), player.getGameProfile().getName()).name()
+                + "\nDetection: " + (detection.get() == Detection.Line_Of_Sight ? "player entered line of sight" : "player entered loaded render range")
+                + String.format(java.util.Locale.ROOT, "\nLogout coordinates: X %.2f, Y %.2f, Z %.2f", mc.player.getX(), mc.player.getY(), mc.player.getZ())
+                + "\nDimension: " + mc.world.getRegistryKey().getValue()
+                // Capture local wall-clock time once; the displayed timestamp stays fixed after logout.
+                + "\nDate/time: " + java.time.LocalDateTime.now().format(
+                    java.time.format.DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss", java.util.Locale.ROOT))
                 + String.format(java.util.Locale.ROOT, "\nDistance: %.1f blocks", mc.player.distanceTo(player));
             toggle();
             mc.getNetworkHandler().getConnection().disconnect(Text.literal(reason));

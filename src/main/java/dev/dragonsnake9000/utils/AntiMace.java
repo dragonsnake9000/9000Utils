@@ -59,8 +59,22 @@ public final class AntiMace extends Module {
                 mc.player.getX(), mc.player.getY(), mc.player.getZ(), mc.player.getVelocity().x,
                 mc.player.getVelocity().y, mc.player.getVelocity().z, rules);
             if (!threat) continue;
-            String reason = "9000Utils: Detected a possible mace attempt from " + other.getName().getString()
-                + tracks.get(id).reasons();
+            // Remote head rotation is supporting evidence, not an additional trigger requirement.
+            // Compare their observed look direction to the center of our actual player's body.
+            var look = net.minecraft.util.math.Vec3d.fromPolar(other.getPitch(), other.getHeadYaw());
+            var toward = mc.player.getBoundingBox().getCenter().subtract(other.getEyePos());
+            double aimAngle = AimEvidence.angle(look.x, look.y, look.z, toward.x, toward.y, toward.z);
+            boolean aimed = AimEvidence.supports(aimAngle, other.canSee(mc.player));
+            String aim = aimed
+                ? String.format(Locale.ROOT, "\n- Aim toward you observed (%.1f degrees from your body center)", aimAngle)
+                : "\n- Aim toward you not confirmed (not required)";
+            String reason = "Account: " + mc.player.getGameProfile().getName()
+                + "\n9000Utils: Detected a possible mace attempt from " + other.getGameProfile().getName()
+                + String.format(Locale.ROOT, "\nLogout coordinates: X %.2f, Y %.2f, Z %.2f", mc.player.getX(), mc.player.getY(), mc.player.getZ())
+                + "\nDimension: " + mc.world.getRegistryKey().getValue()
+                + "\nDate/time: " + java.time.LocalDateTime.now().format(
+                    java.time.format.DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss", Locale.ROOT))
+                + tracks.get(id).reasons() + aim;
             if (alertOnly.get()) {
                 if (tick - lastAlert >= 100) { warning("%s", reason); lastAlert = tick; }
             } else {

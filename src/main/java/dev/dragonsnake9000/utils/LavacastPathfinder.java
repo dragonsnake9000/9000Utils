@@ -130,6 +130,8 @@ public final class LavacastPathfinder extends Module {
     public boolean eatingInventoryRecovery() { return eatingRecovery.get(); }
     private final Setting<Boolean> gappleShuffle = bool("gapple-inventory-refresh", "Once per eating episode, move the selected hotbar golden apple into an empty main-inventory slot and immediately back. Requires Pause for Eating. Supports enchanted golden apples.", false);
     public boolean gappleInventoryRefresh() { return gappleShuffle.get(); }
+    private final Setting<Boolean> restartAutoEat = bool("restart-auto-eat-once", "Restart Meteor Auto Eat once after 20 ticks of an eating episode. Rearms after 40 ticks without eating; does not enable an inactive Auto Eat module.", false);
+    public boolean restartAutoEatOnce() { return restartAutoEat.get(); }
     public boolean eatingKeepOpen() { return eatingKeepOpen.get(); }
     public int eatingOpenTicks() { return eatingOpenTicks.get(); }
     public void renderRegion(meteordevelopment.meteorclient.events.render.Render3DEvent event) { region.render(event); }
