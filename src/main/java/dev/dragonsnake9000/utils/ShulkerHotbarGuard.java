@@ -18,7 +18,8 @@ public final class ShulkerHotbarGuard {
         LavacastPathfinder walker = Modules.get().get(LavacastPathfinder.class);
         MossRefill refill = Modules.get().get(MossRefill.class);
         return mc.player != null && walker != null && walker.keepShulkersOutOfHotbar()
-            && (walker.isActive() || (refill != null && refill.isActive()));
+            && (walker.isActive() || (refill != null && refill.isActive())
+                || Modules.get().get(RoofLighting.class).isActive());
     }
 
     private static int source() {
@@ -36,7 +37,8 @@ public final class ShulkerHotbarGuard {
     public static boolean blockPlacement(Hand hand) {
         if (!enabled() || !MossInventory.isShulker(mc.player.getStackInHand(hand))) return false;
         MossRefill refill = Modules.get().get(MossRefill.class);
-        return refill == null || !refill.placingSupplyBox();
+        var lights = Modules.get().get(LightRefill.class);
+        return (refill == null || !refill.placingSupplyBox()) && (lights == null || !lights.placingSupplyBox());
     }
 
     @EventHandler(priority = 200) private void tick(TickEvent.Pre event) {
@@ -44,6 +46,8 @@ public final class ShulkerHotbarGuard {
         MossRefill refill = Modules.get().get(MossRefill.class);
         // Do not compete with an active refill's selected supply or recovery actions.
         if (refill != null && refill.transactionActive()) return;
+        var lights = Modules.get().get(LightRefill.class);
+        if (lights != null && lights.transactionActive()) return;
         if (settle > 0) { InventoryGuard.maintain(OWNER); settle--; return; }
         InventoryGuard.release(OWNER);
         int source = source();

@@ -5,7 +5,15 @@ import java.util.function.IntPredicate;
 /** World-independent clearance rule, shared by scanning and revalidation. */
 final class TargetRules {
     static boolean permitsCover(int offset, boolean air, boolean snowLayer, boolean allowSnow) {
-        return air || (allowSnow && offset == 1 && snowLayer);
+        return permitsCover(offset, air, snowLayer, allowSnow, false, false, false, false);
+    }
+    static boolean permitsCover(int offset, boolean air, boolean snowLayer, boolean allowSnow,
+            boolean carpet, boolean allowCarpet, boolean slab, boolean allowSlabs) {
+        return air || (offset == 1 && ((allowSnow && snowLayer) || (allowCarpet && carpet) || (allowSlabs && slab)));
+    }
+    static boolean permitsSourceLayer(int offset, boolean water, boolean lava, int fluidLevel,
+            boolean airAbove, boolean allowWater, boolean allowLava) {
+        return offset==1 && fluidLevel==0 && airAbove && ((water && allowWater) || (lava && allowLava));
     }
     static boolean hasClearance(int y, int topExclusive, int required, IntPredicate airAtY) {
         if (required < 0) return false;

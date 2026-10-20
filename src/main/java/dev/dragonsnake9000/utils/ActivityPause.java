@@ -82,6 +82,8 @@ public final class ActivityPause {
         LavacastPathfinder walker = Modules.get().get(LavacastPathfinder.class);
         boolean enabled = walker != null && (walker.isActive()
             || Modules.get().get(MossRefill.class).isActive()
+            || Modules.get().get(LightRefill.class).isActive()
+            || Modules.get().get(RoofLighting.class).isActive()
             || Modules.get().get(ArmorRefresh.class).isActive()
             || Modules.get().get(MossInventoryRefresh.class).isActive());
         if (!enabled || mc.player == null || mc.world == null || !mc.player.isAlive()) { reset(); return; }

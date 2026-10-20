@@ -9,6 +9,13 @@ import net.minecraft.item.Items;
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 final class MossInventory {
+    static boolean sword(ItemStack stack) { return stack.isIn(net.minecraft.registry.tag.ItemTags.SWORDS); }
+    /** Borrow an empty slot first, otherwise a non-sword slot. Never evict a hotbar sword. */
+    static int safeHotbarSlot(int preferred) {
+        boolean[] empty=new boolean[9],protectedSlots=new boolean[9];
+        for(int i=0;i<9;i++) { var stack=mc.player.getInventory().getStack(i);empty[i]=stack.isEmpty();protectedSlots[i]=sword(stack); }
+        return HotbarSafety.choose(empty,protectedSlots,preferred);
+    }
     static int countMoss() {
         if (mc.player == null) return 0;
         int count = mc.player.getOffHandStack().isOf(Items.MOSS_BLOCK) ? mc.player.getOffHandStack().getCount() : 0;

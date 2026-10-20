@@ -14,6 +14,11 @@ final class PathingSafety {
     private static final Map<Object, Permissions> owners = new LinkedHashMap<>();
     private static boolean allowBreak, allowPlace;
     private static long scaffoldResume;
+    private static boolean protectLights;
+    static void protectLights(boolean protect) {
+        protectLights = protect;
+        if (!owners.isEmpty()) apply();
+    }
     static void suspendScaffolding() { scaffoldResume = System.nanoTime() + 5_000_000_000L; if (!owners.isEmpty()) apply(); }
     private static List<Item> throwaway;
     private static List<Block> disallowed, breakAnyway;
@@ -61,6 +66,10 @@ final class PathingSafety {
         if (active.moss) protectedBlocks.remove(Blocks.MOSS_BLOCK);
         else if (!protectedBlocks.contains(Blocks.MOSS_BLOCK)) protectedBlocks.add(Blocks.MOSS_BLOCK);
         for (Block block : active.surface) if (!protectedBlocks.contains(block)) protectedBlocks.add(block);
+        // Do not undo completed lighting while navigating or recovering a supply box.
+        if (protectLights) for (Block block : Registries.BLOCK) {
+            if (block.getDefaultState().getLuminance() > 0 && !protectedBlocks.contains(block)) protectedBlocks.add(block);
+        }
         // Never mine the supply box merely to get to a cap position or a dropped item.
         if (active.priority > 0) for (Block block : Registries.BLOCK) {
             if (block instanceof ShulkerBoxBlock && !protectedBlocks.contains(block)) protectedBlocks.add(block);

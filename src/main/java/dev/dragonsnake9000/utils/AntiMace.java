@@ -13,12 +13,15 @@ import java.util.*;
 
 /** Optional conservative warning/disconnect module. Client observations cannot establish intent. */
 public final class AntiMace extends Module {
+    private final DebugView debug = new DebugView(this,settings,() -> "Tracking " + this.tracks.size() + " players | aim is supporting evidence only",this::drawDebug);
     private final SettingGroup general = settings.getDefaultGroup();
     private final Setting<Boolean> alertOnly = general.add(new BoolSetting.Builder().name("alert-only")
         .description("Warn in chat instead of disconnecting.").defaultValue(false).build());
     private final Setting<Boolean> friends = general.add(new BoolSetting.Builder().name("ignore-friends").defaultValue(true).build());
     private final Setting<Boolean> rusherFriends = general.add(new BoolSetting.Builder().name("ignore-rusherhack-friends")
         .description("Ignore RusherHack friends through its optional public API. Does not require RusherHack.").defaultValue(true).build());
+    private final Setting<Boolean> pivots = general.add(new BoolSetting.Builder().name("detect-upward-dive-reversal")
+        .description("Measure descent from a rapid upward-flight reversal, avoiding ascent masking the dive. Still requires approach, descent and confirmation checks; held mace is supporting evidence only.").defaultValue(true).build());
     private final RusherHackFriends rusher = new RusherHackFriends();
     private final Setting<Boolean> flight = general.add(new BoolSetting.Builder().name("require-flight-evidence")
         .description("Also require recent observed elytra flight or a chestplate swap during rapid airborne descent. A swap alone never triggers.").defaultValue(true).build());
@@ -32,6 +35,18 @@ public final class AntiMace extends Module {
     private Object world;
     private int tick, lastAlert = -1000;
     public AntiMace() { super(Utils9000Addon.CATEGORY, "anti-mace", "Detects possible incoming mace dives and disconnects, or warns in alert-only mode."); }
+    private void drawDebug(meteordevelopment.meteorclient.events.render.Render3DEvent event) {
+        var own=mc.player.getPos();
+        debug.circle(event,own.x,own.y+1.5,own.z,radius.get(),debug.line(255,70,70));
+        int count=0;
+        for (var player:mc.world.getPlayers()) {
+            if (!tracks.containsKey(player.getUuid()) || count++>=16) continue;
+            var look=net.minecraft.util.math.Vec3d.fromPolar(player.getPitch(),player.getHeadYaw());
+            var toward=mc.player.getBoundingBox().getCenter().subtract(player.getEyePos());
+            boolean aimed=AimEvidence.supports(AimEvidence.angle(look.x,look.y,look.z,toward.x,toward.y,toward.z),player.canSee(mc.player));
+            debug.cone(event,player.getEyePos(),look,Math.min(48,toward.length()+2),15,aimed ? debug.line(255,70,70) : debug.line(255,190,60));
+        }
+    }
     private Setting<Double> decimal(String name, String description, double value, double min, double max) {
         return general.add(new DoubleSetting.Builder().name(name).description(description).defaultValue(value).range(min, max).sliderRange(min, max).build());
     }
@@ -43,7 +58,7 @@ public final class AntiMace extends Module {
         if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null || !mc.player.isAlive()) return;
         if (world != mc.world) reset();
         tick++;
-        var rules = new MaceThreatTracker.Rules(speed.get(), drop.get(), radius.get(), horizon.get(), flight.get(), confirm.get());
+        var rules = new MaceThreatTracker.Rules(speed.get(), drop.get(), radius.get(), horizon.get(), flight.get(), confirm.get(), pivots.get());
         Set<UUID> visible = new HashSet<>();
         for (var other : mc.world.getPlayers()) {
             if (other == mc.player || other.getUuid().equals(mc.player.getUuid()) || !other.isAlive() || other.isSpectator()

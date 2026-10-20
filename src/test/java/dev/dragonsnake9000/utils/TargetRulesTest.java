@@ -4,6 +4,14 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TargetRulesTest {
+    @Test void coverTogglesAreIndependentAndOnlyPermitFirstLayer() {
+        for (int offset = 1; offset <= 3; offset++) {
+            assertEquals(offset == 1, TargetRules.permitsCover(offset, false, false, false, true, true, false, false));
+            assertEquals(offset == 1, TargetRules.permitsCover(offset, false, false, false, false, false, true, true));
+            assertFalse(TargetRules.permitsCover(offset, false, false, true, true, false, false, true));
+            assertFalse(TargetRules.permitsCover(offset, false, false, true, false, true, true, false));
+        }
+    }
     @Test void acceptsExactlyTenAirBlocks() {
         assertTrue(TargetRules.hasClearance(64, 320, 10, y -> y >= 65 && y <= 74));
     }

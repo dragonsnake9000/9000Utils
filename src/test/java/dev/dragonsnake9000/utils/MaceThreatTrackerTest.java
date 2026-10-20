@@ -10,18 +10,48 @@ class MaceThreatTrackerTest {
         return tracker.update(new MaceThreatTracker.Sample(tick, x, y, 0), ground, elytra, armor, gliding,
             mace, 0, 0, 0, 0, 0, 0, rules);
     }
+    @Test void rapidUpwardFlightPivotUsesNewDescentInsteadOfNetAscent() {
+        var enabled = new MaceThreatTracker();
+        var disabled = new MaceThreatTracker();
+        var unarmed = new MaceThreatTracker();
+        var pivotRules = new MaceThreatTracker.Rules(.6, 4, 2.5, 10, true, 1, true);
+        var oldRules = new MaceThreatTracker.Rules(.6, 4, 2.5, 10, true, 1, false);
+        double[] heights = {0, 3, 6, 9, 7, 5, 3};
+        boolean detected = false, noMaceDetected = false;
+        for (int t = 0; t < heights.length; t++) {
+            var sample = new MaceThreatTracker.Sample(t, 0, heights[t], 0);
+            detected |= enabled.update(sample, false, true, false, true, true, 0, 0, 0, 0, 0, 0, pivotRules);
+            assertFalse(disabled.update(sample, false, true, false, true, true, 0, 0, 0, 0, 0, 0, oldRules));
+            noMaceDetected |= unarmed.update(sample, false, true, false, true, false, 0, 0, 0, 0, 0, 0, pivotRules);
+        }
+        assertTrue(detected);
+        assertTrue(noMaceDetected);
+        assertTrue(unarmed.reasons().contains("Mace not observed"));
+        assertTrue(enabled.reasons().contains("downward reversal"));
+    }
+    @Test void boostedPivotAwayFromBotDoesNotTrigger() {
+        var tracker = new MaceThreatTracker();
+        double[] heights = {0, 3, 6, 9, 7, 5, 3};
+        for (int t = 0; t < heights.length; t++)
+            assertFalse(tracker.update(new MaceThreatTracker.Sample(t, 20 + t, heights[t], 0),
+                false, true, false, true, true, 0, 0, 0, 0, 0, 0,
+                new MaceThreatTracker.Rules(.6, 4, 2.5, 10, true, 1, true)));
+    }
     @Test void approachingMaceDiveRequiresConsecutiveEvidence() {
         var tracker = new MaceThreatTracker();
         for (int t = 0; t <= 7; t++) assertFalse(step(tracker, t, 12 - t, 30 - 2 * t, false, t < 4, t >= 4, t < 4, t >= 4));
         assertTrue(step(tracker, 8, 4, 14, false, false, true, false, true));
-        assertTrue(tracker.reasons().contains("Mace held in main hand"));
+        assertTrue(tracker.reasons().contains("Mace observed in main hand"));
         assertTrue(tracker.reasons().contains("Confirmed for 2 consecutive ticks"));
         assertTrue(tracker.reasons().contains("chestplate swap during rapid airborne descent"));
         assertTrue(tracker.reasons().contains("Recent elytra flight observed"));
     }
-    @Test void gearSwapWithoutMaceNeverTriggers() {
+    @Test void qualifyingDiveTriggersBeforeLastSecondMaceSwitch() {
         var tracker = new MaceThreatTracker();
-        for (int t = 0; t < 15; t++) assertFalse(step(tracker, t, 12 - t, 30 - 2 * t, false, t < 4, t >= 4, t < 4, false));
+        boolean detected = false;
+        for (int t = 0; t <= 8; t++) detected |= step(tracker, t, 12 - t, 30 - 2 * t, false, t < 4, t >= 4, t < 4, false);
+        assertTrue(detected);
+        assertTrue(tracker.reasons().contains("Mace not observed"));
     }
     @Test void ordinaryCliffFallWithoutFlightEvidenceDoesNotTrigger() {
         var tracker = new MaceThreatTracker();

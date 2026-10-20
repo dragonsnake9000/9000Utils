@@ -21,6 +21,11 @@ final class MossEscape {
     private static Object world;
     private static int confinedTicks, scanTicks, elapsed, settling, oldSlot = -1, toolSlot = -1;
     private static boolean moving;
+    static void renderDebug(meteordevelopment.meteorclient.events.render.Render3DEvent event,DebugView debug) {
+        if (exit==null) return;
+        for (BlockPos pos:exit.moss) debug.box(event,pos,255,100,40);
+        debug.box(event,exit.feet,80,255,100);
+    }
     static boolean busy() { return exit != null; }
     static void reset() {
         if (exit != null) NavigationTransport.stop();
@@ -43,7 +48,7 @@ final class MossEscape {
         if (!busy()) {
             var refill = Modules.get().get(MossRefill.class);
             world = mc.world;
-            if (refill != null && refill.transactionActive()) { confinedTicks = 0; return; }
+            if (RoofLighting.busy() || (refill != null && refill.transactionActive())) { confinedTicks = 0; return; }
             // Moving or jumping inside the same small pocket no longer resets the detector.
             if (++scanTicks < 10 || !MossInventory.playerInventoryReady()) return;
             scanTicks = 0;

@@ -53,6 +53,7 @@ abstract class TimedRecovery extends Module {
         if (!busy) { InventoryGuard.release(this); timer = interval.get() * 20; }
     }
 
+    @Override public String getInfoString() { return ActivityPause.isPaused() ? "Paused for activity" : busy ? "Inventory recovery " + busyTicks + " ticks" : "Next attempt in " + Math.max(0,timer) + " ticks"; }
     protected abstract boolean perform();
     protected abstract void cleanup();
 }

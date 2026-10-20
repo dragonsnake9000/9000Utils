@@ -42,7 +42,9 @@ public final class MiningGuard {
     private static boolean enabled() {
         LavacastPathfinder walker = Modules.get().get(LavacastPathfinder.class);
         MossRefill refill = Modules.get().get(MossRefill.class);
-        return ((walker != null && walker.isActive()) || (refill != null && refill.transactionActive()))
+        var lights = Modules.get().get(LightRefill.class);
+        return ((walker != null && walker.isActive()) || (refill != null && refill.transactionActive())
+            || (lights != null && lights.transactionActive()))
             && mc.player != null && mc.world != null;
     }
     public static boolean beforeBreak(BlockPos pos) {

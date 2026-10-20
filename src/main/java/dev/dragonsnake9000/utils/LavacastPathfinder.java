@@ -12,6 +12,11 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.Block;
 import net.minecraft.block.SnowBlock;
+import net.minecraft.block.CarpetBlock;
+import net.minecraft.block.PaleMossCarpetBlock;
+import net.minecraft.block.SlabBlock;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.enums.SlabType;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import net.minecraft.client.world.ClientWorld;
@@ -32,6 +37,18 @@ public final class LavacastPathfinder extends Module {
     private final Setting<Boolean> snow = general.add(new BoolSetting.Builder().name("allow-snow-layers")
         .description("Allow a snow-layer block directly above a target. Other clearance must still be air; does not include snow blocks or powder snow.")
         .defaultValue(true).onChanged(value -> resetTargets()).build());
+    private final Setting<Boolean> carpet = general.add(new BoolSetting.Builder().name("allow-carpet")
+        .description("Accept any carpet directly above a target, including wool, moss and pale moss carpets. Other clearance must remain air.")
+        .defaultValue(false).onChanged(value -> resetTargets()).build());
+    private final Setting<Boolean> slabs = general.add(new BoolSetting.Builder().name("allow-slabs")
+        .description("Accept any slab directly above a target, including bottom, top and double slabs. Other clearance must remain air.")
+        .defaultValue(false).onChanged(value -> resetTargets()).build());
+    private final Setting<Boolean> waterSource = general.add(new BoolSetting.Builder().name("allow-water-source-layer")
+        .description("Accept exactly one water source block above a target, with air above it; approach from nearby dry ground.")
+        .defaultValue(false).onChanged(value -> resetTargets()).build());
+    private final Setting<Boolean> lavaSource = general.add(new BoolSetting.Builder().name("allow-lava-source-layer")
+        .description("Accept exactly one lava source block above a target, with air above it; approach from nearby dry ground.")
+        .defaultValue(false).onChanged(value -> resetTargets()).build());
     private final Setting<Integer> neighbors = integer("minimum-neighbors", "Required selected-block neighbors among all 26 adjacent positions. Zero allows isolated blocks.", 3, 0, 10);
     private final Setting<Double> clusterWeight = general.add(new DoubleSetting.Builder().name("cluster-preference")
         .description("How strongly dense target-block patches improve the distance score. Zero chooses by distance only.")
@@ -70,10 +87,15 @@ public final class LavacastPathfinder extends Module {
     private final Setting<Boolean> restart = bool("periodic-restart", "Periodically stop the current path and choose a fresh target without clearing failed-target memory.", true);
     private final Setting<Integer> restartSeconds = general.add(new IntSetting.Builder().name("restart-interval-seconds")
         .description("Time between stop/start cycles; zero disables the timer.").defaultValue(3).range(0, 100).sliderRange(0, 100).visible(restart::get).build());
+    private final Setting<Boolean> helperLighting = bool("enable-roof-lighting", "Enable automatic roof lighting and its supply refill with this pathfinder.", false);
     private final Setting<Boolean> helperRefill = bool("enable-moss-refill", "Enable the shulker refill module with this pathfinder.", true);
     private final Setting<Boolean> helperArmor = bool("enable-armor-refresh", "Enable armor refresh with this pathfinder.", true);
     private final Setting<Boolean> helperInventory = bool("enable-inventory-refresh", "Enable the inventory refresh module with this pathfinder.", true);
     private final Setting<Boolean> helperPlacer = bool("enable-sleepy-moss-placer", "Enable Sleepy's moss-placer with this pathfinder when installed.", true);
+    private final Setting<Boolean> protectLights = bool("protect-light-sources", "Keep moss off the top, sides and underside of emitting light blocks, even with Roof Lighting off.", true);
+    public boolean protectLightSources() { return protectLights.get(); }
+    private final DebugView debug = new DebugView(this,settings,this::debugStatus,this::drawDebug);
+    private BlockPos approachTarget, approachGoal;
     private final RegionSettings region = new RegionSettings(settings);
     private final Set<String> ownedHelpers = new LinkedHashSet<>();
     private final Map<String, Boolean> helperChoices = new HashMap<>();
@@ -134,6 +156,7 @@ public final class LavacastPathfinder extends Module {
     public boolean restartAutoEatOnce() { return restartAutoEat.get(); }
     public boolean eatingKeepOpen() { return eatingKeepOpen.get(); }
     public int eatingOpenTicks() { return eatingOpenTicks.get(); }
+    void selectSector(int index) { region.selectSector(index); }
     public void renderRegion(meteordevelopment.meteorclient.events.render.Render3DEvent event) { region.render(event); }
     public boolean supplyPing() { return ping.get(); }
     private final Setting<Boolean> keepShulkers = bool("keep-shulkers-out-of-hotbar", "Store shulkers in the main inventory except during refills. Pause placement while moving them.", true);
@@ -212,7 +235,7 @@ public final class LavacastPathfinder extends Module {
         PathingSafety.walking(this, breakBlocks.get(), scaffold.get(), breakMoss.get(), region.contours() ? targetBlocks.get() : List.of());
         MossRefill refill = Modules.get().get(MossRefill.class);
         boolean outside = bounds != null && !bounds.contains(mc.player.getBlockX(), mc.player.getBlockY(), mc.player.getBlockZ());
-        if (AutomationContext.blockedScreen() || ActivityPause.isPaused() || ShulkerHotbarGuard.busy() || MossEscape.busy()
+        if (AutomationContext.blockedScreen() || ActivityPause.isPaused() || ShulkerHotbarGuard.busy() || MossEscape.busy() || RoofLighting.busy()
             || (refill != null && refill.shouldPauseWalking() && (!outside || refill.transactionActive()))) {
             if (!paused) pauseForRefill();
             status = ActivityPause.isPaused() ? "Paused for combat/eating" : "Paused for moss refill";
@@ -247,6 +270,7 @@ public final class LavacastPathfinder extends Module {
     }
 
     private void checkTarget() {
+        if (target.equals(approachTarget) && !dryStanding(approachGoal)) { abandon(failedDelay.get()); return; }
         if (!eligible(target) || neighborCount(target) < neighbors.get()) { abandon(0); return; }
         if (mc.player.isOnGround() && baritone.getPlayerContext().playerFeet().equals(goalFor(target))) { abandon(revisit.get()); return; }
         double distance = distance(target);
@@ -295,6 +319,8 @@ public final class LavacastPathfinder extends Module {
             ContourRoute.current = new ContourRoute(cx, cz, Math.max(0, Math.min(fromRadius, toRadius) - 2),
                 Math.max(mc.player.getBlockY(), goalFor(pos).getY()) + 1);
         } else ContourRoute.current = null;
+        if (sourceLayer(pos)) { BlockPos newGoal=goalFor(pos); approachTarget=pos; approachGoal=newGoal; }
+        else { approachTarget=null; approachGoal=null; }
         NavigationTransport.go(goalFor(pos));
         if (region.contours()) sweep.selected(pos.getX() + .5, pos.getZ() + .5);
         commands.dispatched(ticks, pos);
@@ -391,9 +417,54 @@ public final class LavacastPathfinder extends Module {
     }
     private double distance(BlockPos pos) { return mc.player.getPos().distanceTo(Vec3d.ofBottomCenter(goalFor(pos))); }
     private BlockPos goalFor(BlockPos pos) {
+        if (sourceLayer(pos)) {
+            if (pos.equals(approachTarget) && approachGoal!=null) return approachGoal;
+            BlockPos approach=fluidApproach(pos);
+            if (approach!=null) return approach;
+        }
         var cover = world.getBlockState(pos.up());
-        return snow.get() && cover.isOf(Blocks.SNOW) && cover.get(SnowBlock.LAYERS) == 8 ? pos.up(2) : pos.up();
+        // GoalBlock uses the feet's block coordinate: top/double slabs stand a block higher.
+        boolean fullSnow = snow.get() && cover.isOf(Blocks.SNOW) && cover.get(SnowBlock.LAYERS) == 8;
+        boolean tallSlab = slabs.get() && cover.getBlock() instanceof SlabBlock && cover.get(SlabBlock.TYPE) != SlabType.BOTTOM;
+        return fullSnow || tallSlab ? pos.up(2) : pos.up();
     }
+    private boolean allowedCover(BlockState state, int offset) {
+        boolean isCarpet = state.getBlock() instanceof CarpetBlock || state.getBlock() instanceof PaleMossCarpetBlock;
+        return TargetRules.permitsCover(offset, state.isAir(), state.isOf(Blocks.SNOW), snow.get(),
+            isCarpet, carpet.get(), state.getBlock() instanceof SlabBlock, slabs.get());
+    }
+    private boolean sourceLayer(BlockPos pos) {
+        if (world==null || (!waterSource.get() && !lavaSource.get())) return false;
+        var cover=world.getBlockState(pos.up());
+        return TargetRules.permitsSourceLayer(1,cover.isOf(Blocks.WATER),cover.isOf(Blocks.LAVA),
+            cover.contains(net.minecraft.block.FluidBlock.LEVEL) ? cover.get(net.minecraft.block.FluidBlock.LEVEL) : -1,
+            world.getBlockState(pos.up(2)).isAir(),waterSource.get(),lavaSource.get());
+    }
+
+    private boolean dryStanding(BlockPos feet) {
+        if (feet==null || !world.isChunkLoaded(feet) || !world.getWorldBorder().contains(feet)
+            || !RegionConstraint.allows(feet.getX(),feet.getY(),feet.getZ())) return false;
+        var body=world.getBlockState(feet);var head=world.getBlockState(feet.up());var floor=world.getBlockState(feet.down());
+        return body.getFluidState().isEmpty() && head.getFluidState().isEmpty()
+            && body.getCollisionShape(world,feet).isEmpty() && head.getCollisionShape(world,feet.up()).isEmpty()
+            && floor.getFluidState().isEmpty() && floor.isSideSolidFullSquare(world,feet.down(),net.minecraft.util.math.Direction.UP);
+    }
+
+    private BlockPos fluidApproach(BlockPos base) {
+        BlockPos best=null;double score=Double.POSITIVE_INFINITY;
+        for (int dx=-2;dx<=2;dx++) for (int dz=-2;dz<=2;dz++) for (int dy=1;dy<=2;dy++) {
+            if (dx==0 && dz==0) continue;
+            BlockPos feet=base.add(dx,dy,dz);
+            if (!dryStanding(feet)) continue;
+            Vec3d eye=Vec3d.ofBottomCenter(feet).add(0,1.62,0);
+            double reach=Math.min(4.25,mc.player.getBlockInteractionRange()-.15);
+            if (eye.squaredDistanceTo(Vec3d.ofCenter(base.up()))>reach*reach) continue;
+            double distance=mc.player.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(feet));
+            if (distance<score) { score=distance;best=feet; }
+        }
+        return best;
+    }
+
     private boolean within(BlockPos pos, int range) {
         double dx = pos.getX() + .5 - mc.player.getX(), dz = pos.getZ() + .5 - mc.player.getZ();
         return dx * dx + dz * dz <= (double) range * range;
@@ -430,7 +501,7 @@ public final class LavacastPathfinder extends Module {
             if (region.contours() && (lastBounds == null || lastBounds.contains(x, cursor.getY() + 1, z))
                 && targetBlocks.get().contains(world.getBlockState(cursor).getBlock())) {
                 var cover = world.getBlockState(cursor.up());
-                if (cover.isAir() || cover.isOf(Blocks.MOSS_BLOCK) || cover.isOf(Blocks.SNOW)) {
+                if (allowedCover(cover, 1) || cover.isOf(Blocks.MOSS_BLOCK) || cover.isOf(Blocks.SNOW)) {
                     // The cone's highest visible surface estimates its axis even after the peak is mossed.
                     if (cursor.getY() > peakY) { peakY = cursor.getY(); peakCount = 0; peakX = peakZ = 0; }
                     if (cursor.getY() == peakY && peakCount < 1_000_000) { peakCount++; peakX += x + .5; peakZ += z + .5; }
@@ -470,11 +541,17 @@ public final class LavacastPathfinder extends Module {
         if (!world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4) || !world.getWorldBorder().contains(pos)
             || (lastBounds != null && !lastBounds.contains(pos.getX(), goalFor(pos).getY(), pos.getZ()))
             || !targetBlocks.get().contains(world.getBlockState(pos).getBlock())) return false;
+        // These deliberate light-clearance cells are not unfinished moss work.
+        var roof=Modules.get().get(RoofLighting.class);
+        if ((protectLights.get() || (roof!=null && roof.isActive() && roof.protectLightSources())) && LightPlacementGuard.nearEmitter(pos.up())) return false;
+        boolean fluid=sourceLayer(pos);
+        if (fluid && fluidApproach(pos)==null) return false;
         BlockPos.Mutable above = new BlockPos.Mutable();
         return TargetRules.hasClearance(pos.getY(), world.getTopYInclusive() + 1, air.get(),
             y -> {
                 var state = world.getBlockState(above.set(pos.getX(), y, pos.getZ()));
-                return TargetRules.permitsCover(y - pos.getY(), state.isAir(), state.isOf(Blocks.SNOW), snow.get());
+                return allowedCover(state, y - pos.getY())
+                    || (y==pos.getY()+1 && fluid);
             });
     }
     private int neighborCount(BlockPos pos) {
@@ -489,6 +566,7 @@ public final class LavacastPathfinder extends Module {
         cancelPath(); target = null; entryTarget = null; scanning = false; paused = true;
     }
     private void cancelPath() {
+        approachTarget=null; approachGoal=null;
         ContourRoute.current = null;
         if (baritone != null && ownsGoal) NavigationTransport.stop();
         ownsGoal = false; commands.clear();
@@ -535,6 +613,7 @@ public final class LavacastPathfinder extends Module {
     }
     private void syncHelpers() {
         configureHelper("moss-shulker-refill", helperRefill.get());
+        configureHelper("roof-lighting", helperLighting.get());
         configureHelper("moss-armor-refresh", helperArmor.get());
         configureHelper("moss-inventory-refresh", helperInventory.get());
         configureHelper("moss-placer", helperPlacer.get());
@@ -546,6 +625,31 @@ public final class LavacastPathfinder extends Module {
         if (helper == null) { if (wanted) warning("Optional module %s is not installed.", name); return; }
         if (wanted && !helper.isActive()) { helper.toggle(); ownedHelpers.add(name); }
         else if (!wanted && previous != null && helper.isActive()) { helper.toggle(); ownedHelpers.remove(name); }
+    }
+
+    private String debugStatus() {
+        return status + " | " + (region.horizontal() ? "horizontal ring order" : "normal order")
+            + " | " + (ActivityPause.isPaused() ? "activity paused" : "running");
+    }
+    private void drawDebug(meteordevelopment.meteorclient.events.render.Render3DEvent event) {
+        if (world==null) return;
+        var feet=mc.player.getPos();
+        debug.circle(event,feet.x,feet.y+.05,feet.z,radius.get(),debug.line(80,180,255));
+        debug.circle(event,feet.x,feet.y+.05,feet.z,Math.max(radius.get(),fallbackRadius.get()),debug.line(130,100,255));
+        if (target!=null) { debug.box(event,target,40,255,100); debug.line(event,feet,Vec3d.ofCenter(target.up()),debug.line(40,255,100)); }
+        if (region.contours() && sweep.active()) {
+            double r=Math.min(64,radius.get());
+            for (int y:new int[]{sweep.lowY()+1,sweep.highY()+2})
+                event.renderer.quadHorizontal(feet.x-r,y,feet.z-r,feet.x+r,feet.z+r,debug.fill(90,100,255));
+        }
+        var corridor=ContourRoute.current;
+        if (corridor!=null) {
+            debug.circle(event,corridor.centerX(),feet.y,corridor.centerZ(),corridor.innerRadius(),debug.line(255,80,80));
+            double r=Math.min(96,Math.max(radius.get(),fallbackRadius.get()));
+            event.renderer.quadHorizontal(feet.x-r,corridor.ceiling(),feet.z-r,feet.x+r,feet.z+r,debug.fill(255,80,80));
+        }
+        if (LightPlacementGuard.lastBlocked!=null && mc.player.age-LightPlacementGuard.lastBlockedTick<40) debug.box(event,LightPlacementGuard.lastBlocked,255,60,60);
+        MossEscape.renderDebug(event,debug);
     }
 
     /** Allow a bounded entry corridor only while approaching an otherwise strict region. */

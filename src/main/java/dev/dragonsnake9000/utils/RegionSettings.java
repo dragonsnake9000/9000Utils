@@ -134,6 +134,13 @@ final class RegionSettings {
         row(root, theme, "Max Y", y2, -64, 320);
         row(root, theme, "To Z", z2, -limit, limit);
     }
+    void selectSector(int index) {
+        if(index<0 || index>=100)return;
+        var bounds=SectorGrid.bounds(index,y1.get(),y2.get());
+        x1.set(bounds.minX());z1.set(bounds.minZ());x2.set(bounds.maxX());z2.set(bounds.maxZ());
+        preset.set(Preset.TenK);mode.set(Mode.XYZ);enabled.set(true);
+        captureStatus="Sector "+SectorGrid.name(index)+" selected (+5 blocks on each side).";
+    }
     private void row(WVerticalList root, GuiTheme theme, String name, Setting<Integer> setting, int min, int max) {
         WHorizontalList row = root.add(theme.horizontalList()).expandX().widget();
         row.add(theme.label(name)).minWidth(65);

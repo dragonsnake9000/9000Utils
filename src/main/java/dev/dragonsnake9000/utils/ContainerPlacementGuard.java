@@ -18,6 +18,8 @@ final class ContainerPlacementGuard {
         if (walker == null || !walker.isActive()) return;
         var pos = packet.getBlockHitResult().getBlockPos();
         if (refill != null && refill.openingSupplyBox(pos)) return;
+        var lights = Modules.get().get(LightRefill.class);
+        if (lights != null && lights.openingSupplyBox(pos)) return;
         if (mc.world.getBlockState(pos).createScreenHandlerFactory(mc.world, pos) == null || mc.player.isSneaking()) return;
         // Preserve the original hit and sequence. Sneak only on the server for this interaction:
         // do not hold the key or move a Freecam camera downward.

@@ -5,10 +5,16 @@ import java.util.ArrayDeque;
 /** Uses observed remote positions, not a single velocity packet or equipment change. */
 final class MaceThreatTracker {
     record Sample(int tick, double x, double y, double z) {}
-    record Rules(double speed, double drop, double radius, double horizon, boolean flightEvidence, int confirmations) {}
+    record Rules(double speed, double drop, double radius, double horizon, boolean flightEvidence, int confirmations, boolean pivots) {
+        Rules(double speed, double drop, double radius, double horizon, boolean flightEvidence, int confirmations) {
+            this(speed, drop, radius, horizon, flightEvidence, confirmations, true);
+        }
+    }
     private final ArrayDeque<Sample> samples = new ArrayDeque<>();
     private int lastFlight = -1000, lastSwap = -1000, confirmations;
-    private boolean wasElytra;
+    private boolean wasElytra, ascending;
+    private double rise;
+    private int lastRapidRise = -1000, pivotUntil = -1000;
     private String reasons = "";
     String reasons() { return reasons; }
 
@@ -18,6 +24,23 @@ final class MaceThreatTracker {
         if (previous != null && (now.tick <= previous.tick || now.tick - previous.tick > 2
             || distanceSquared(now, previous) > 256)) reset(); // Discontinuities are not proof of a dive.
         previous = samples.peekLast();
+        if (grounded) { ascending = false; rise = 0; lastRapidRise = pivotUntil = -1000; }
+        else if (previous != null) {
+            double dy = now.y - previous.y;
+            if (dy > 0) {
+                if (!ascending) rise = 0;
+                ascending = true; rise += dy;
+                if (rise >= 3 && dy / (now.tick - previous.tick) >= .8) lastRapidRise = now.tick;
+            } else if (dy < 0) {
+                if (rules.pivots && ascending && now.tick - lastRapidRise <= 10
+                    && (gliding || now.tick - lastFlight <= 40)) {
+                    // Begin descent measurement at the turn, excluding the preceding upward boost.
+                    samples.clear(); samples.addLast(previous);
+                    confirmations = 0; pivotUntil = now.tick + 20;
+                }
+                ascending = false; rise = 0;
+            }
+        }
         samples.addLast(now);
         while (samples.size() > 1 && now.tick - samples.peekFirst().tick > 8) samples.removeFirst();
         Sample first = samples.peekFirst();
@@ -40,13 +63,15 @@ final class MaceThreatTracker {
         double vz = ticks == 0 ? 0 : (now.z - first.z) / ticks - ownVz;
         double px = dx + vx * impact, pz = dz + vz * impact;
         boolean approaching = dx * vx + dz * vz < -.02 || dx * dx + dz * dz <= 2.25;
-        boolean threat = mace && rapid && height >= 2 && height <= 32 && impact <= rules.horizon
+        boolean threat = rapid && height >= 2 && height <= 32 && impact <= rules.horizon
             && approaching && px * px + pz * pz <= rules.radius * rules.radius
             && (!rules.flightEvidence || flight);
         confirmations = threat ? confirmations + 1 : 0;
         reasons = threat ? String.format(java.util.Locale.ROOT,
-            "\n- Mace held in main hand\n- Airborne, %.1f blocks above you\n- Descending %.2f blocks/tick; %.1f Y lost in %d ticks\n- Approaching you; predicted pass %.2f blocks away in %.1f ticks\n- Confirmed for %d consecutive ticks",
+            "\n- Airborne, %.1f blocks above you\n- Descending %.2f blocks/tick; %.1f Y lost in %d ticks\n- Approaching you; predicted pass %.2f blocks away in %.1f ticks\n- Confirmed for %d consecutive ticks",
             height, down, drop, ticks, Math.hypot(px, pz), impact, confirmations)
+            + (mace ? "\n- Mace observed in main hand (supporting evidence)" : "\n- Mace not observed (not required)")
+            + (now.tick <= pivotUntil ? "\n- Rapid upward flight followed by a downward reversal; descent measured from turn" : "")
             + (now.tick - lastFlight <= 40 ? "\n- Recent elytra flight observed" : "")
             + (now.tick - lastSwap <= 20 ? "\n- Elytra-to-chestplate swap during rapid airborne descent" : "") : "";
         return confirmations >= rules.confirmations;
@@ -54,5 +79,5 @@ final class MaceThreatTracker {
     private static double distanceSquared(Sample a, Sample b) {
         return Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2) + Math.pow(a.z - b.z, 2);
     }
-    void reset() { samples.clear(); confirmations = 0; lastFlight = lastSwap = -1000; wasElytra = false; reasons = ""; }
+    void reset() { samples.clear(); confirmations = 0; lastFlight = lastSwap = lastRapidRise = pivotUntil = -1000; rise = 0; ascending = false; wasElytra = false; reasons = ""; }
 }

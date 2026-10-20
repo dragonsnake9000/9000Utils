@@ -20,7 +20,8 @@ public abstract class MiningInteractionMixin {
             result.setReturnValue(net.minecraft.util.ActionResult.PASS);
             return;
         }
-        if (dev.dragonsnake9000.utils.ShulkerHotbarGuard.blockPlacement(hand)
+        if (dev.dragonsnake9000.utils.LightPlacementGuard.block(hand, hit)
+            || dev.dragonsnake9000.utils.ShulkerHotbarGuard.blockPlacement(hand)
             || dev.dragonsnake9000.utils.ScaffoldGuard.beforePlace(hand, hit))
             result.setReturnValue(net.minecraft.util.ActionResult.FAIL);
     }

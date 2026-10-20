@@ -5,6 +5,8 @@ final class SurfaceSweep {
     private boolean active;
     private int anchor, sign, width;
     private double centerX, centerZ, angle;
+    int lowY() { return sign<0 ? anchor-width+1 : anchor; }
+    int highY() { return sign<0 ? anchor : anchor+width-1; }
     boolean active() { return active; }
     double centerX() { return centerX; }
     double centerZ() { return centerZ; }
