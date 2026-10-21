@@ -10,10 +10,16 @@ import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 final class MossInventory {
     static boolean sword(ItemStack stack) { return stack.isIn(net.minecraft.registry.tag.ItemTags.SWORDS); }
-    /** Borrow an empty slot first, otherwise a non-sword slot. Never evict a hotbar sword. */
+    static boolean protectedHotbarItem(ItemStack stack) {
+        return sword(stack) || stack.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES)
+            || stack.contains(DataComponentTypes.FOOD) || stack.contains(DataComponentTypes.EQUIPPABLE)
+            || stack.isOf(Items.ENDER_CHEST) || stack.isOf(Items.ELYTRA) || stack.isOf(Items.FIREWORK_ROCKET)
+            || LightInventory.strength(stack)>0;
+    }
+    /** Borrow empty/unprotected slots only. Essential gear and existing lights stay in the hotbar. */
     static int safeHotbarSlot(int preferred) {
         boolean[] empty=new boolean[9],protectedSlots=new boolean[9];
-        for(int i=0;i<9;i++) { var stack=mc.player.getInventory().getStack(i);empty[i]=stack.isEmpty();protectedSlots[i]=sword(stack); }
+        for(int i=0;i<9;i++) { var stack=mc.player.getInventory().getStack(i);empty[i]=stack.isEmpty();protectedSlots[i]=protectedHotbarItem(stack); }
         return HotbarSafety.choose(empty,protectedSlots,preferred);
     }
     static int countMoss() {

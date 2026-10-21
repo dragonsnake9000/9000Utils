@@ -12,8 +12,17 @@ final class LightInventory {
         if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem item)) return 0;
         var block = item.getBlock();
         // Do not make a walking roof hazardous in the name of lighting it.
-        if (block == Blocks.SEA_PICKLE || block == Blocks.MAGMA_BLOCK || block == Blocks.CAMPFIRE || block == Blocks.SOUL_CAMPFIRE) return 0;
+        if (block == Blocks.ENDER_CHEST || block == Blocks.SEA_PICKLE || block == Blocks.MAGMA_BLOCK || block == Blocks.CAMPFIRE || block == Blocks.SOUL_CAMPFIRE) return 0;
         return block.getDefaultState().getLuminance();
+    }
+    static int hotbarLight() {
+        int fallback=-1, required=RoofLighting.requiredSupplyStrength();
+        for(int i=0;i<9;i++) {
+            int light=strength(mc.player.getInventory().getStack(i));
+            if(light>=required)return i;
+            if(light>0 && fallback<0)fallback=i;
+        }
+        return fallback;
     }
     static boolean isLight(ItemStack stack) { return strength(stack) >= RoofLighting.requiredSupplyStrength(); }
     static int count() {

@@ -562,6 +562,40 @@ public final class LavacastPathfinder extends Module {
                 && targetBlocks.get().contains(world.getBlockState(neighbor).getBlock());
         });
     }
+    int lightingReturnRadius() { return Math.max(radius.get(),fallbackRadius.get()); }
+    int lightingReturnHeight() { return vertical.get(); }
+    /** Secondary search after a lighting trip uses MOSS work eligibility, never light-grid sites. */
+    boolean lightingReturnWork(BlockPos feet) { return lightingWorkBeside(feet)!=null; }
+    /** Arrival needs actionable work beside the player, not only the block underneath their feet. */
+    private Candidate lightingWorkBeside(BlockPos feet) {
+        if(!isActive() || world!=mc.world)return null;
+        for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++) {
+            if(Math.abs(dx)+Math.abs(dz)!=1)continue;
+            for(int depth=1;depth<=2;depth++) {
+                BlockPos base=feet.add(dx,-depth,dz);
+                if(skipped.containsKey(base) || !eligible(base))continue;
+                BlockPos goal=goalFor(base);
+                if(Math.abs(goal.getY()-feet.getY())>1 || !dryStanding(goal))continue;
+                // Ensure a step between the standing cells has head clearance in either direction.
+                if(goal.getY()>feet.getY() && !world.getBlockState(feet.up(2)).isAir())continue;
+                if(goal.getY()<feet.getY() && !world.getBlockState(goal.up(2)).isAir())continue;
+                int count=neighborCount(base);
+                if(count>=neighbors.get())return new Candidate(base,count);
+            }
+        }
+        return null;
+    }
+    /** Lighting has relocated us: discard old-area scans and start from the actual arrival area. */
+    void resumeAfterLighting() {
+        if(!isActive() || mc.player==null || world!=mc.world)return;
+        cancelPath();target=null;entryTarget=null;scanning=false;paused=false;scanWait=0;emptySince=-1;
+        primary.clear();outer.clear();scanResults.clear();outerSweepReady=false;
+        sweep.reset();peakY=Integer.MIN_VALUE;peakCount=0;peakX=peakZ=0;
+        lastConsider=ticks;lastRestart=ticks;
+        Candidate nearby=lightingWorkBeside(baritone.getPlayerContext().playerFeet());
+        if(nearby!=null)primary.add(nearby);
+        status="Resuming moss work after lighting";
+    }
     public void pauseForRefill() {
         cancelPath(); target = null; entryTarget = null; scanning = false; paused = true;
     }

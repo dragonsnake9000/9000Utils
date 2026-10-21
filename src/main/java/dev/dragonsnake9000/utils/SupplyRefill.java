@@ -342,7 +342,7 @@ public abstract class SupplyRefill extends Module {
         shulkerItem = box.getItem();
         placedBlock = ((BlockItem) shulkerItem).getBlock();
         hotbar = source < 9 ? source : MossInventory.safeHotbarSlot(mc.player.getInventory().selectedSlot);
-        if (hotbar < 0) { fail("No non-sword hotbar slot available for refill."); return; }
+        if (hotbar < 0) { fail("No unprotected hotbar slot available for refill."); return; }
         if (source >= 9) {
             for (int i = 0; i < 9; i++) if (mc.player.getInventory().getStack(i).isEmpty()) { hotbar = i; break; }
             mc.interactionManager.clickSlot(mc.player.playerScreenHandler.syncId, MossInventory.playerSlotId(source), hotbar, SlotActionType.SWAP, mc.player);
@@ -377,7 +377,6 @@ public abstract class SupplyRefill extends Module {
         if (!ownContainer() || !mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
             fail("Inventory changed or an item is on the cursor; no transfer attempted."); return;
         }
-        if (lighting && stowExtraLightStacks()) return;
         int source = -1, remaining = 0;
         for (int i = 0; i < 27; i++) {
             ItemStack s = mc.player.currentScreenHandler.getSlot(i).getStack();
@@ -385,7 +384,7 @@ public abstract class SupplyRefill extends Module {
         }
         int merge = lighting ? 0 : MossInventory.mergeSpace();
         if (source >= 0 && !ItemStack.areItemsAndComponentsEqual(mc.player.currentScreenHandler.getSlot(source).getStack(), Items.MOSS_BLOCK.getDefaultStack())) merge = 0;
-        // Complete a partial matching stack instead of overshooting the two-stack light target.
+        // Complete a partial matching stack instead of overshooting the one-stack light target.
         boolean overLightTarget=lighting && source>=0 && supplyCount()<LightRefillTarget.BLOCKS
             && LightRefillTarget.wouldOverfill(supplyCount(),mc.player.currentScreenHandler.getSlot(source).getStack().getCount());
         if (overLightTarget && beginMerge(source)) return;
@@ -399,35 +398,14 @@ public abstract class SupplyRefill extends Module {
             enter(State.CLOSE);
             return;
         }
+        if (lighting) {
+            // Never quick-move lights into the hotbar or evict an existing hotbar stack.
+            if (!beginMerge(source)) fail("Free main-inventory space for reserve light blocks.");
+            return;
+        }
         mossBeforeClick = supplyCount();
         mc.interactionManager.clickSlot(containerId, source, 0, SlotActionType.QUICK_MOVE, mc.player);
         enter(State.WAIT_TRANSFER);
-    }
-
-    /** Keep one usable light stack in the hotbar; reserve stacks belong in main inventory. */
-    private boolean stowExtraLightStacks() {
-        int keep=-1,extra=-1;
-        for (int i=0;i<9;i++) if (LightInventory.strength(mc.player.getInventory().getStack(i))>0) {
-            if (keep<0) keep=i; else { extra=i; break; }
-        }
-        if (extra<0) return false;
-        int main=-1;
-        for (int i=9;i<36;i++) if (mc.player.getInventory().getStack(i).isEmpty()) { main=i; break; }
-        if (main<0) {
-            int emptyHotbar=-1;
-            for (int i=0;i<9;i++) if (mc.player.getInventory().getStack(i).isEmpty()) { emptyHotbar=i; break; }
-            if (emptyHotbar>=0) for (int i=9;i<36;i++) {
-                ItemStack stack=mc.player.getInventory().getStack(i);
-                if (!MossInventory.isShulker(stack) && LightInventory.strength(stack)==0) {
-                    mc.interactionManager.clickSlot(containerId,27+i-9,emptyHotbar,SlotActionType.SWAP,mc.player);
-                    main=i; break;
-                }
-            }
-        }
-        if (main<0) { fail("Free a main-inventory slot for the reserve light stack."); return true; }
-        mc.interactionManager.clickSlot(containerId,27+main-9,extra,SlotActionType.SWAP,mc.player);
-        enter(State.TRANSFER); // Wait for the inventory action before another shulker transfer.
-        return true;
     }
 
     private void selectTool() {
@@ -749,7 +727,7 @@ public abstract class SupplyRefill extends Module {
         if (source < 0 && mc.player.getOffHandStack().isOf(Items.MOSS_BLOCK)) source = 45;
         if (source < 0) { skipCap("No moss available for a cap."); return; }
         capSlot = source < 9 ? source : MossInventory.safeHotbarSlot(hotbar);
-        if (capSlot < 0) { skipCap("No non-sword hotbar slot available."); return; }
+        if (capSlot < 0) { skipCap("No unprotected hotbar slot available."); return; }
         if (source >= 9) mc.interactionManager.clickSlot(mc.player.playerScreenHandler.syncId,
             MossInventory.playerSlotId(source), capSlot, SlotActionType.SWAP, mc.player);
         capConfirmed = false;
@@ -877,11 +855,14 @@ public abstract class SupplyRefill extends Module {
 
     private boolean beginMerge(int source) {
         ItemStack supply = mc.player.currentScreenHandler.getSlot(source).getStack();
-        for (int slot = 27; slot < mc.player.currentScreenHandler.slots.size(); slot++) {
+        for (int slot = 27; slot < (lighting ? 54 : mc.player.currentScreenHandler.slots.size()); slot++) {
             ItemStack target = mc.player.currentScreenHandler.getSlot(slot).getStack();
-            if (target.isEmpty() || target.getCount() >= target.getMaxCount()
-                || !ItemStack.areItemsAndComponentsEqual(supply, target)) continue;
-            if (lighting && !LightRefillTarget.mayFillPartial(supplyCount(),target.getCount(),target.getMaxCount())) continue;
+            if (target.isEmpty()) {
+                if (!lighting || LightRefillTarget.wouldOverfill(supplyCount(),supply.getCount())) continue;
+            } else {
+                if (target.getCount() >= target.getMaxCount() || !ItemStack.areItemsAndComponentsEqual(supply,target)) continue;
+                if (lighting && !LightRefillTarget.mayFillPartial(supplyCount(),target.getCount(),target.getMaxCount())) continue;
+            }
             mergeSource = source; mergeDestination = slot;
             mergeStack = supply.copy(); mergeTarget = target.copy(); mossBeforeClick = supplyCount();
             mc.interactionManager.clickSlot(containerId, source, 0, SlotActionType.PICKUP, mc.player);
