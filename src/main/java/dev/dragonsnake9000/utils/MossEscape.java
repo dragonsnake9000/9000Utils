@@ -115,6 +115,47 @@ final class MossEscape {
             }
         }
     }
+    /** Refill-owned escape: keep the refill's inventory/placer lock while clearing a short climb. */
+    static List<EmergencyClimbPlan.Step> refillClimb() {
+        BlockPos origin=mc.player.getBlockPos();
+        return EmergencyClimbPlan.find(new EmergencyClimbPlan.Pos(origin.getX(),origin.getY(),origin.getZ()),p->{
+            BlockPos pos=new BlockPos(p.x(),p.y(),p.z());
+            if(!mc.world.isChunkLoaded(pos) || !RegionConstraint.allows(p.x(),p.y(),p.z())
+                || !mc.world.getWorldBorder().contains(pos))return EmergencyClimbPlan.Cell.BLOCKED;
+            var state=mc.world.getBlockState(pos);
+            if(!state.getFluidState().isEmpty() || mc.world.getBlockEntity(pos)!=null
+                || state.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock)return EmergencyClimbPlan.Cell.BLOCKED;
+            if(state.getCollisionShape(mc.world,pos).isEmpty())return EmergencyClimbPlan.Cell.AIR;
+            if(!state.isFullCube(mc.world,pos))return EmergencyClimbPlan.Cell.BLOCKED;
+            return refillBreakable(pos) ? EmergencyClimbPlan.Cell.BREAKABLE : EmergencyClimbPlan.Cell.FLOOR;
+        });
+    }
+    static boolean refillBreakable(BlockPos pos) {
+        var state=mc.world.getBlockState(pos);
+        return state.getHardness(mc.world,pos)>=0 && !state.isAir() && state.getFluidState().isEmpty()
+            && mc.world.getBlockEntity(pos)==null && state.getLuminance()==0
+            && !(state.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock);
+    }
+    static boolean clearRefillBlock(BlockPos pos,java.util.function.BooleanSupplier stillAllowed) {
+        if(!refillBreakable(pos) || !MossInventory.playerInventoryReady())return false;
+        Vec3d eye=mc.player.getEyePos(),center=Vec3d.ofCenter(pos);
+        if(eye.squaredDistanceTo(center)>Math.pow(mc.player.getBlockInteractionRange()-.2,2))return false;
+        var hit=new Box(pos).contains(eye)
+            ? new net.minecraft.util.hit.BlockHitResult(center,Direction.UP,pos,true)
+            : mc.world.raycast(new RaycastContext(eye,center,RaycastContext.ShapeType.OUTLINE,RaycastContext.FluidHandling.NONE,mc.player));
+        if(hit.getType()!=HitResult.Type.BLOCK || !hit.getBlockPos().equals(pos))return false;
+        int best=mc.player.getInventory().selectedSlot;float speed=0;
+        for(int i=0;i<9;i++) {
+            float current=mc.player.getInventory().getStack(i).getMiningSpeedMultiplier(mc.world.getBlockState(pos));
+            if(current>speed){speed=current;best=i;}
+        }
+        InvUtils.swap(best,false);
+        Rotations.rotate(Rotations.getYaw(hit.getPos()),Rotations.getPitch(hit.getPos()),100,()->{
+            if(!stillAllowed.getAsBoolean() || ActivityPause.isPaused() || AutomationContext.blockedScreen() || !refillBreakable(pos))return;
+            mc.interactionManager.updateBlockBreakingProgress(pos,hit.getSide());mc.player.swingHand(Hand.MAIN_HAND);
+        });
+        return true;
+    }
     private static int reachableCount(BlockPos origin, int limit, Set<BlockPos> removed) {
         return ReachableSpace.count(new ReachableSpace.Pos(origin.getX(), origin.getY(), origin.getZ()), limit, p -> {
             BlockPos pos = new BlockPos(p.x(), p.y(), p.z());

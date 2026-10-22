@@ -37,7 +37,7 @@ import net.minecraft.world.RaycastContext;
 
 /** Deliberately serial, paced controller. Never transfers items via packet bursts or air placement. */
 public abstract class SupplyRefill extends Module {
-    enum State { IDLE, HOTBAR_SETTLE, SETTLE, PREPARE, SELECT, PLACE, WAIT_PLACE, OPEN, WAIT_OPEN, TRANSFER, MERGE_CARRY, MERGE_RETURN, WAIT_TRANSFER, CLOSE, MINE, PICKUP, CAP_SELECT, CAP_AIM, CAP_ROUTE, CAP_PLACE, CAP_WAIT, FINISH, FAILED }
+    enum State { IDLE, HOTBAR_SETTLE, SETTLE, PREPARE, SELECT, PLACE, WAIT_PLACE, OPEN, WAIT_OPEN, TRANSFER, MERGE_CARRY, MERGE_RETURN, WAIT_TRANSFER, CLOSE, MINE, PICKUP, CAP_SELECT, CAP_AIM, CAP_ROUTE, CAP_PLACE, CAP_WAIT, RECOVER_REACH, ESCAPE, ABORT_CURSOR, FINISH, FAILED }
     private final SettingGroup general = settings.getDefaultGroup();
     private final Setting<Integer> delay = general.add(new IntSetting.Builder().name("action-delay-ticks")
         .description("Ticks between inventory and interaction actions. Raise for laggy servers.").defaultValue(2).range(0, 1200).sliderRange(0, 40).build());
@@ -74,6 +74,12 @@ public abstract class SupplyRefill extends Module {
         .description("Required solid floor neighbors at the support's Y level, including diagonals. Eight requires a complete 3x3 floor; zero permits edges.")
         .defaultValue(8).range(0, 8).sliderRange(0, 8).visible(safeSupply::get).build());
     private State state = State.IDLE;
+    private State recoveryResume;
+    private final RefillRetryBudget recoveryBudget=new RefillRetryBudget();
+    private final Deque<EmergencyClimbPlan.Step> climb=new ArrayDeque<>();
+    private boolean abortCleanup,escapeUsed;
+    private int escapeSettle;
+
     private ClientWorld world;
     private BlockPos placedPos;
     private Block placedBlock;
@@ -123,7 +129,7 @@ public abstract class SupplyRefill extends Module {
     @Override public void onActivate() {
         AutomationContext.acquire(this);
         state = State.IDLE;
-        activityPaused = false;
+        activityPaused = false; recoveryBudget.reset();climb.clear();abortCleanup=false;
         waitTicks = 0;
         placedPos = null; anchor=null; returning=false; returnCommands.reset();
         world = mc.world;
@@ -160,10 +166,10 @@ public abstract class SupplyRefill extends Module {
         if (state != State.IDLE) InventoryGuard.maintain(this);
         if (state != State.IDLE && world != mc.world) { fail("Dimension changed during refill; recover the box manually."); return; }
         if (state == State.FAILED) return;
-        boolean otherScreen = AutomationContext.blockedScreen() && !(mc.currentScreen instanceof ShulkerBoxScreen
+        boolean otherScreen = state!=State.ABORT_CURSOR && AutomationContext.blockedScreen() && !(mc.currentScreen instanceof ShulkerBoxScreen
             && (state == State.WAIT_OPEN || state == State.TRANSFER || state == State.WAIT_TRANSFER
                 || state == State.MERGE_CARRY || state == State.MERGE_RETURN));
-        if (ActivityPause.isPaused() || otherScreen || (anchor!=null && refillCombatBusy())) {
+        if (ActivityPause.isPaused() || otherScreen || (state!=State.IDLE && state!=State.HOTBAR_SETTLE && refillCombatBusy())) {
             if (!activityPaused && state != State.IDLE && state != State.HOTBAR_SETTLE) {
                 stopBaritone();
                 pickupCommands.clear(); returnCommands.clear();
@@ -181,7 +187,7 @@ public abstract class SupplyRefill extends Module {
             if (state == State.MINE) selectTool();
             if (state == State.PLACE) InvUtils.swap(hotbar, false);
             if (state == State.CAP_PLACE) InvUtils.swap(capSlot, false);
-            if (state == State.CAP_ROUTE || state == State.PICKUP) routeGoal = null;
+            if (state == State.CAP_ROUTE || state == State.PICKUP || state==State.RECOVER_REACH || state==State.ESCAPE) routeGoal = null;
             waitTicks = Math.max(waitTicks, delay.get());
         }
         if (recoverPosition()) return;
@@ -225,6 +231,10 @@ public abstract class SupplyRefill extends Module {
             if (state == State.CAP_SELECT || state == State.CAP_AIM || state == State.CAP_ROUTE || state == State.CAP_PLACE || state == State.CAP_WAIT)
                 skipCap("Capping timed out.");
             else if (state == State.WAIT_PLACE) retryPlacement();
+            else if(state==State.RECOVER_REACH) startEscape(recoveryResume,"Return to shulker timed out",false);
+            else if(state==State.ESCAPE) retryRecovery("Emergency climb timed out");
+            else if(state==State.OPEN || state==State.WAIT_OPEN || state==State.MINE || state==State.PICKUP)
+                recoverReach(state==State.WAIT_OPEN ? State.OPEN : state,"Refill interaction timed out");
             else fail("Timed out during " + state + ".");
             return;
         }
@@ -247,6 +257,9 @@ public abstract class SupplyRefill extends Module {
                 state = State.IDLE;
                 waitTicks = 0;
             }
+            case RECOVER_REACH -> recoveryReach();
+            case ESCAPE -> escapeClimb();
+            case ABORT_CURSOR -> abortCursor();
             case PREPARE -> prepare();
             case SELECT -> {
                 if (!MossInventory.playerInventoryReady()) return;
@@ -273,7 +286,7 @@ public abstract class SupplyRefill extends Module {
             case MERGE_CARRY -> mergeIntoStack();
             case MERGE_RETURN -> returnRemainder();
             case WAIT_TRANSFER -> {
-                if (!ownContainer()) { fail("Shulker screen changed during transfer."); return; }
+                if (!ownContainer()) { abortTransfer("Shulker screen changed during transfer"); return; }
                 if (supplyCount() > mossBeforeClick) enter(State.TRANSFER);
             }
             case CLOSE -> {
@@ -335,7 +348,7 @@ public abstract class SupplyRefill extends Module {
         if (placeHit == null && lowerAttempt) {
             anywhere = true; lowerAttempt = false; placeHit = findPlacement(false);
         }
-        if (placeHit == null) { fail(safeSupply.get() ? "No reachable shulker site meets the floor-neighbor requirement. Move onto a wider platform or lower Shulker Support Neighbors." : "No visible reachable space for a supply shulker."); return; }
+        if (placeHit == null) { startEscape(State.PREPARE,"No reachable shulker surface meets placement requirements",true); return; }
         capSkipped = false;
         ItemStack box = mc.player.getInventory().getStack(source);
         selectedBox = box.copy();
@@ -366,7 +379,7 @@ public abstract class SupplyRefill extends Module {
         if (!MossInventory.playerInventoryReady()) return;
         if (!world.getBlockState(placedPos).isOf(placedBlock)) { fail("Placed shulker disappeared."); return; }
         BlockHitResult hit = visibleFace(placedPos);
-        if (hit == null) { fail("Cannot see the placed shulker within reach."); return; }
+        if (hit == null) { recoverReach(State.OPEN,"Cannot see the placed shulker within reach"); return; }
         // The consumed shulker slot is empty. Do not open with moss/another block in hand.
         InvUtils.swap(hotbar, false);
         enter(State.WAIT_OPEN);
@@ -375,7 +388,7 @@ public abstract class SupplyRefill extends Module {
 
     private void transfer() {
         if (!ownContainer() || !mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
-            fail("Inventory changed or an item is on the cursor; no transfer attempted."); return;
+            abortTransfer("Inventory changed or an item is on the cursor"); return;
         }
         int source = -1, remaining = 0;
         for (int i = 0; i < 27; i++) {
@@ -384,27 +397,30 @@ public abstract class SupplyRefill extends Module {
         }
         int merge = lighting ? 0 : MossInventory.mergeSpace();
         if (source >= 0 && !ItemStack.areItemsAndComponentsEqual(mc.player.currentScreenHandler.getSlot(source).getStack(), Items.MOSS_BLOCK.getDefaultStack())) merge = 0;
+        int mainEmpty=0;
+        for(int i=9;i<36;i++)if(mc.player.getInventory().getStack(i).isEmpty())mainEmpty++;
         // Complete a partial matching stack instead of overshooting the one-stack light target.
         boolean overLightTarget=lighting && source>=0 && supplyCount()<LightRefillTarget.BLOCKS
             && LightRefillTarget.wouldOverfill(supplyCount(),mc.player.currentScreenHandler.getSlot(source).getStack().getCount());
         if (overLightTarget && beginMerge(source)) return;
-        if (overLightTarget || (lighting && (supplyCount() >= LightRefillTarget.BLOCKS || MossInventory.emptySlots() < 2)) || source < 0 || !RefillPlanner.canTakeStack(mc.player.currentScreenHandler.getSlot(source).getStack().getCount(), remaining, MossInventory.emptySlots(), merge)) {
+        if (overLightTarget || (lighting && (supplyCount() >= LightRefillTarget.BLOCKS || MossInventory.emptySlots() < 2)) || source < 0 || !(lighting ? RefillPlanner.canTakeStack(mc.player.currentScreenHandler.getSlot(source).getStack().getCount(), remaining, MossInventory.emptySlots(), merge) : RefillPlanner.canQuickMoveMoss(mc.player.currentScreenHandler.getSlot(source).getStack().getCount(), MossInventory.emptySlots(), mainEmpty, merge))) {
             // A quick-move could consume the reserved box slot. Fill an existing partial stack explicitly instead.
             if (source >= 0 && merge > 0 && beginMerge(source)) return;
             recoverBox = remaining > 0;
             if (lighting) for (int i = 0; i < 27; i++) if (!mc.player.currentScreenHandler.getSlot(i).getStack().isEmpty()) recoverBox = true;
-            if (recoverBox && MossInventory.emptySlots() < 1) { fail("Reserved shulker space was filled by another inventory action."); return; }
+            if (recoverBox && MossInventory.emptySlots() < 1) { abortTransfer("Reserved shulker space was filled by another inventory action"); return; }
             mc.player.closeHandledScreen();
             enter(State.CLOSE);
             return;
         }
         if (lighting) {
             // Never quick-move lights into the hotbar or evict an existing hotbar stack.
-            if (!beginMerge(source)) fail("Free main-inventory space for reserve light blocks.");
+            if (!beginMerge(source)) abortTransfer("No free main-inventory slot for light blocks");
             return;
         }
-        mossBeforeClick = supplyCount();
-        mc.interactionManager.clickSlot(containerId, source, 0, SlotActionType.QUICK_MOVE, mc.player);
+        // Ordinary moss stacks use the original shift-click transfer: nothing is held on the cursor.
+        mossBeforeClick=supplyCount();
+        mc.interactionManager.clickSlot(containerId,source,0,SlotActionType.QUICK_MOVE,mc.player);
         enter(State.WAIT_TRANSFER);
     }
 
@@ -429,7 +445,7 @@ public abstract class SupplyRefill extends Module {
             return;
         }
         BlockHitResult hit = visibleFace(placedPos);
-        if (hit == null) { fail("Lost reach or line of sight while mining shulker."); return; }
+        if (hit == null) { recoverReach(State.MINE,"Lost reach or line of sight while mining shulker"); return; }
         Rotations.rotate(Rotations.getYaw(hit.getPos()), Rotations.getPitch(hit.getPos()), 100, () -> {
             if (!isActive() || ActivityPause.isPaused() || AutomationContext.blockedScreen() || state != State.MINE || mc.world != world) return;
             mc.interactionManager.updateBlockBreakingProgress(placedPos, hit.getSide());
@@ -463,11 +479,20 @@ public abstract class SupplyRefill extends Module {
     private void finish() {
         stopBaritone();
         int count = supplyCount();
+        if(abortCleanup) {
+            // Pickup confirmed collection. End this failed transfer transaction, not the automation.
+            restore();resetBoxAttempt();state=State.IDLE;waitTicks=20;
+            status="Shulker recovered; automation resumed";
+            info("Recovered the shulker after an inventory conflict. Resuming automation with available supplies.");
+            // Normal IDLE handling starts another refill if no usable supply was transferred.
+            return;
+        }
         if (count == 0 && recoverBox) { fail("No supply was transferred. Free inventory space before retrying."); return; }
         if (count == 0 && findSupplyBox() < 0) { exhausted(); return; }
         info("Refilled to %s " + (lighting ? "light blocks" : "moss") + ". %s", count, recoverBox ? "Shulker recovered."
             : capSkipped ? "Empty supply shulker left in place." : "Empty supply shulker capped with moss.");
-        if ((!lighting || supplyCount() < LightRefillTarget.BLOCKS) && !recoverBox && findSupplyBox() >= 0 && MossInventory.emptySlots() * 64 + MossInventory.mergeSpace() > 0) {
+        if ((!lighting || supplyCount() < LightRefillTarget.BLOCKS) && !recoverBox && findSupplyBox() >= 0
+            && (lighting ? MossInventory.emptySlots()*64 : Math.max(0,MossInventory.emptySlots()-2)*64) + MossInventory.mergeSpace() > 0) {
             // Keep placement paused across all supply boxes in this refill batch.
             PathingSafety.acquire(this);
             resetBoxAttempt(); enter(State.SETTLE); return;
@@ -578,7 +603,7 @@ public abstract class SupplyRefill extends Module {
             case OPEN,WAIT_OPEN,TRANSFER,WAIT_TRANSFER,MERGE_CARRY,MERGE_RETURN,CLOSE,MINE -> true;
             default -> false;
         };
-        if (!returnPosition.get() || anchor==null || !eligible) {
+        if (abortCleanup || !returnPosition.get() || anchor==null || !eligible) {
             if (returning) { stopBaritone(); returning=false; returnCommands.clear(); }
             return false;
         }
@@ -598,7 +623,9 @@ public abstract class SupplyRefill extends Module {
             if (state==State.MINE) selectTool();
             status="Returned to refill position"; return false;
         }
-        if (++returnTicks>200) { fail("Could not return to the saved refill position within 10 seconds."); return true; }
+        if (++returnTicks>200) {
+            recoverReach(state==State.MINE ? State.MINE : state==State.CLOSE ? State.CLOSE : State.OPEN,"Could not return to the saved refill position");return true;
+        }
         BlockPos goal=new BlockPos(anchor.blockX(),anchor.blockY(),anchor.blockZ());
         // Keep refill permissions: this return route may walk/jump, but cannot mine or build through the box.
         PathingSafety.acquire(this);
@@ -609,6 +636,124 @@ public abstract class SupplyRefill extends Module {
         // Continue safe transfers while the owned container remains open. Defer reopening/mining until home.
         return !(ownContainer() && (state==State.TRANSFER || state==State.WAIT_TRANSFER
             || state==State.MERGE_CARRY || state==State.MERGE_RETURN));
+    }
+
+    /** Retry reach failures without spending the budget while eating or fighting. */
+    private void recoverReach(State resume,String reason) {
+        if(!recoveryBudget.next()){fail(reason+"; all 10 recovery retries failed.");return;}
+        if(!mc.player.currentScreenHandler.getCursorStack().isEmpty()){abortTransfer(reason);return;}
+        if(ownContainer() || mc.currentScreen instanceof ShulkerBoxScreen)mc.player.closeHandledScreen();
+        stopBaritone();mc.interactionManager.cancelBlockBreaking();returning=false;anchor=null;
+        recoveryResume=resume;escapeUsed=false;routeGoal=null;pickupCommands.clear();
+        warning("%s. Recovery attempt %s/10.",reason,recoveryBudget.attempts());
+        enter(State.RECOVER_REACH);
+    }
+    private void recoveryReach() {
+        if(placedPos==null){startEscape(State.PREPARE,"No shulker location available",false);return;}
+        if(recoveryResume==State.PICKUP && countBoxes()>boxBaseline){stopBaritone();enter(State.FINISH);return;}
+        if(recoveryResume==State.MINE && world.getBlockState(placedPos).isAir()) {
+            stopBaritone();routeGoal=null;enter(State.PICKUP);return;
+        }
+        if(recoveryResume==State.PICKUP && !world.getBlockState(placedPos).isOf(placedBlock)) {
+            // Pickup already follows the real dropped item; a stalled pickup gets an escape attempt.
+            startEscape(State.PICKUP,"Cannot reach dropped shulker",false);return;
+        }
+        if(visibleFace(placedPos)!=null) {
+            stopBaritone();PathingSafety.acquire(this);routeGoal=null;
+            Vec3d pos=mc.player.getPos();anchor=new RefillAnchor(pos.x,pos.y,pos.z);
+            if(recoveryResume==State.MINE)selectTool();
+            enter(recoveryResume);return;
+        }
+        if(routeGoal==null) {
+            BlockPos best=null;double distance=Double.POSITIVE_INFINITY;
+            for(int x=-3;x<=3;x++)for(int z=-3;z<=3;z++)for(int y=-2;y<=2;y++) {
+                BlockPos feet=placedPos.add(x,y,z);
+                if(!refillVantage(feet))continue;
+                double score=mc.player.getPos().squaredDistanceTo(Vec3d.ofBottomCenter(feet));
+                if(score<distance){distance=score;best=feet;}
+            }
+            if(best==null){startEscape(recoveryResume,"No reachable shulker vantage",false);return;}
+            routeTo(best);
+        } else if(!routeTo(routeGoal)){startEscape(recoveryResume,"Shulker return path is blocked",false);return;}
+        status="Returning to shulker ("+recoveryBudget.attempts()+"/10)";
+    }
+    private boolean refillVantage(BlockPos feet) {
+        if(!world.isChunkLoaded(feet) || !RegionConstraint.allows(feet.getX(),feet.getY(),feet.getZ())
+            || !world.getWorldBorder().contains(feet) || !world.getBlockState(feet).isAir()
+            || !world.getBlockState(feet.up()).isAir() || !world.getBlockState(feet.down()).getFluidState().isEmpty()
+            || !world.getBlockState(feet.down()).isSideSolidFullSquare(world,feet.down(),Direction.UP))return false;
+        Vec3d eye=Vec3d.ofBottomCenter(feet).add(0,mc.player.getStandingEyeHeight(),0);
+        for(Direction face:Direction.values()) {
+            Vec3d aim=Vec3d.ofCenter(placedPos).add(face.getOffsetX()*.499,face.getOffsetY()*.499,face.getOffsetZ()*.499);
+            if(eye.squaredDistanceTo(aim)>Math.pow(Math.min(4.25,mc.player.getBlockInteractionRange()-.15),2))continue;
+            var hit=world.raycast(new RaycastContext(eye,aim,RaycastContext.ShapeType.OUTLINE,RaycastContext.FluidHandling.NONE,mc.player));
+            if(hit.getType()==HitResult.Type.BLOCK && hit.getBlockPos().equals(placedPos))return true;
+        }
+        return false;
+    }
+    private void startEscape(State resume,String reason,boolean spendRetry) {
+        if(!spendRetry && escapeUsed){retryRecovery(reason);return;}
+        if(spendRetry && !recoveryBudget.next()){fail(reason+"; all 10 recovery retries failed.");return;}
+        if(!mc.player.currentScreenHandler.getCursorStack().isEmpty()){abortTransfer(reason);return;}
+        if(ownContainer() || mc.currentScreen instanceof ShulkerBoxScreen)mc.player.closeHandledScreen();
+        stopBaritone();mc.interactionManager.cancelBlockBreaking();anchor=null;returning=false;routeGoal=null;
+        recoveryResume=resume;escapeUsed=true;climb.clear();climb.addAll(MossEscape.refillClimb());escapeSettle=0;
+        if(climb.isEmpty()) {
+            if(resume==State.PREPARE){fail(reason+"; no safe supported emergency climb exists within three blocks.");return;}
+            recoverReach(resume,reason);waitTicks=20;
+            return;
+        }
+        PathingSafety.acquire(this);enter(State.ESCAPE);
+        warning("%s. Clearing a short emergency climb before retrying refill (%s/10).",reason,recoveryBudget.attempts());
+    }
+    private void retryRecovery(String reason) {
+        if(recoveryResume==State.PREPARE)startEscape(State.PREPARE,reason,true);
+        else recoverReach(recoveryResume,reason);
+    }
+    private void escapeClimb() {
+        if(climb.isEmpty()) {
+            stopBaritone();mc.interactionManager.cancelBlockBreaking();
+            if(++escapeSettle<10)return; // Keep Sleepy's placer paused for half a second after clearing.
+            routeGoal=null;PathingSafety.acquire(this);
+            if(recoveryResume==State.PREPARE){rejectedPlaces.clear();enter(State.PREPARE);}
+            else {enter(State.RECOVER_REACH);}
+            return;
+        }
+        var step=climb.peekFirst();
+        boolean obstructed=false;
+        for(var cell:step.clear()) {
+            BlockPos pos=new BlockPos(cell.x(),cell.y(),cell.z());
+            if(world.getBlockState(pos).getCollisionShape(world,pos).isEmpty())continue;
+            if(!MossEscape.refillBreakable(pos)){retryRecovery("Emergency route changed");return;}
+            obstructed=true;stopBaritone();routeGoal=null;
+            if(MossEscape.clearRefillBlock(pos,()->isActive() && state==State.ESCAPE && mc.world==world && !refillCombatBusy()))return;
+        }
+        if(obstructed)return;
+        mc.interactionManager.cancelBlockBreaking();
+        BlockPos goal=new BlockPos(step.feet().x(),step.feet().y(),step.feet().z());
+        if(mc.player.isOnGround() && BaritoneAPI.getProvider().getPrimaryBaritone().getPlayerContext().playerFeet().equals(goal)) {
+            stopBaritone();climb.removeFirst();routeGoal=null;stateTicks=0;return;
+        }
+        // Only mine the planned cells manually. Baritone walks/jumps along the cleared route.
+        PathingSafety.acquire(this);
+        if(routeGoal==null){routeGoal=goal;NavigationTransport.go(goal);}
+        status="Emergency climb before refill";
+    }
+    private void abortTransfer(String reason) {
+        if(abortCleanup){fail(reason+" during cancelled-refill cleanup.");return;}
+        abortCleanup=true;recoverBox=true;anchor=null;returning=false;stopBaritone();
+        warning("%s. Dropping cursor item and recovering the shulker before resuming automation.",reason);
+        if(!mc.player.currentScreenHandler.getCursorStack().isEmpty())
+            mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId,-999,0,SlotActionType.PICKUP,mc.player);
+        enter(State.ABORT_CURSOR);waitTicks=Math.max(4,delay.get());
+    }
+    private void abortCursor() {
+        // Do not issue repeated drops or begin mining with a cursor transaction still unresolved.
+        if(!mc.player.currentScreenHandler.getCursorStack().isEmpty())return;
+        if(mc.player.currentScreenHandler!=mc.player.playerScreenHandler)mc.player.closeHandledScreen();
+        if(placedPos==null){fail("Refill cancelled; no placed shulker to recover.");return;}
+        boxBaseline=countBoxes();
+        enter(State.CLOSE);waitTicks=Math.max(10,delay.get());
     }
 
     private boolean ownContainer() {
@@ -756,6 +901,7 @@ public abstract class SupplyRefill extends Module {
     }
 
     private void resetBoxAttempt() {
+        recoveryBudget.reset();abortCleanup=false;climb.clear();escapeSettle=0;
         placedPos = null; containerId = receivedInventoryId = -1;
         anchor=null; returning=false; returnCommands.reset();
         anywhere = false; capSkipped = false; recoverBox = false;
@@ -845,10 +991,10 @@ public abstract class SupplyRefill extends Module {
 
     private void ensureRouteMoss() {
         for (int i = 0; i < 9; i++) if (mc.player.getInventory().getStack(i).isOf(Items.MOSS_BLOCK)) return;
-        hotbar = MossInventory.safeHotbarSlot(hotbar);
-        if (hotbar < 0) return;
+        int routeSlot = MossInventory.safeHotbarSlot(hotbar);
+        if (routeSlot < 0) return;
         for (int i = 9; i < 36; i++) if (mc.player.getInventory().getStack(i).isOf(Items.MOSS_BLOCK)) {
-            mc.interactionManager.clickSlot(mc.player.playerScreenHandler.syncId, i, hotbar, SlotActionType.SWAP, mc.player);
+            mc.interactionManager.clickSlot(mc.player.playerScreenHandler.syncId, i, routeSlot, SlotActionType.SWAP, mc.player);
             return;
         }
     }
@@ -858,7 +1004,9 @@ public abstract class SupplyRefill extends Module {
         for (int slot = 27; slot < (lighting ? 54 : mc.player.currentScreenHandler.slots.size()); slot++) {
             ItemStack target = mc.player.currentScreenHandler.getSlot(slot).getStack();
             if (target.isEmpty()) {
-                if (!lighting || LightRefillTarget.wouldOverfill(supplyCount(),supply.getCount())) continue;
+                if(lighting) {
+                    if(LightRefillTarget.wouldOverfill(supplyCount(),supply.getCount()))continue;
+                } else continue; // Moss uses this only for the pre-existing partial-stack merge fallback.
             } else {
                 if (target.getCount() >= target.getMaxCount() || !ItemStack.areItemsAndComponentsEqual(supply,target)) continue;
                 if (lighting && !LightRefillTarget.mayFillPartial(supplyCount(),target.getCount(),target.getMaxCount())) continue;
@@ -873,18 +1021,18 @@ public abstract class SupplyRefill extends Module {
     private void mergeIntoStack() {
         if (!ownContainer() || !ItemStack.areEqual(mc.player.currentScreenHandler.getCursorStack(), mergeStack)
             || !ItemStack.areEqual(mc.player.currentScreenHandler.getSlot(mergeDestination).getStack(), mergeTarget)) {
-            fail("Partial-stack transfer changed; check the cursor before retrying."); return;
+            abortTransfer("Partial-stack transfer changed"); return;
         }
         mc.interactionManager.clickSlot(containerId, mergeDestination, 0, SlotActionType.PICKUP, mc.player);
         enter(State.MERGE_RETURN);
     }
     private void returnRemainder() {
-        if (!ownContainer()) { fail("Shulker closed during partial-stack transfer."); return; }
+        if (!ownContainer()) { abortTransfer("Shulker closed during partial-stack transfer"); return; }
         ItemStack cursor = mc.player.currentScreenHandler.getCursorStack();
         if (!cursor.isEmpty()) {
             if (!ItemStack.areItemsAndComponentsEqual(cursor, mergeStack)
                 || !mc.player.currentScreenHandler.getSlot(mergeSource).getStack().isEmpty()) {
-                fail("Cannot return remaining moss; check the cursor."); return;
+                abortTransfer("Cannot return remaining supply on cursor"); return;
             }
             mc.interactionManager.clickSlot(containerId, mergeSource, 0, SlotActionType.PICKUP, mc.player);
         }
